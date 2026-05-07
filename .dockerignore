@@ -1,0 +1,9 @@
+data/
+runs/
+checkpoints/
+outputs/
+notebooks/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/

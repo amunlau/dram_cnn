@@ -1,0 +1,23 @@
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_tianchi_baseline
+  data:
+    # 首次本地调试可解开注释以加速（正式训练请置 null 并换全量索引表）
+    max_index_rows: 500
+    mcelog_max_rows: 80000
+    # 与旧版 notebook / 小数据调试一致：原始坐标网格 + 独立 tabular，而非 spatial_heatmap
+    grid_representation: legacy_rc_et
+    window_seconds: 300
+    label_backtrace_seconds: 2592000
+    inventory_as_grid_channels: false
+  model:
+    in_channels: 3
+    grid_height: 256
+    grid_width: 256
+    tabular_dim: 15

@@ -1,0 +1,12 @@
+[project]
+name = "dram2cnn"
+version = "0.1.0"
+description = "DRAM failure prediction: Tianchi-style index + spatial heatmap or legacy row-col grids with GridCNN."
+readme = "README.md"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore:.*multi-threaded.*fork:DeprecationWarning",
+]

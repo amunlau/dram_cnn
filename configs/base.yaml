@@ -1,0 +1,16 @@
+project_name: dram2cnn
+seed: 42
+run_name: exp_tianchi_baseline
+# true：训练写入 runs/<run_name>/<时间戳>/；推理写入 runs/<run_name>/infer_<时间戳>/；并写入 .latest_train_session / .latest_infer_session 供默认解析。
+# false：关闭按会话分目录，产物直接写在 runs/<run_name>/（同名文件会被覆盖）。
+versioned_runs: true
+# 可选：固定本次训练子目录名（仅当 versioned_runs: true 时生效；平铺模式下忽略）。
+run_id: null
+# 推理时从哪个子目录加载 checkpoints/grid_cnn.pt；null 则按 .latest_train_session → 平铺目录 → 最新含权重子目录 顺序解析。
+checkpoint_run_id: null
+# 可选：固定本次推理输出子目录（仅 versioned_runs: true 时生效）；null 则自动生成 infer_<时间戳>。
+infer_run_id: null
+# 评估时从哪个子目录读取 predictions.csv；null 则优先 .latest_infer_session，否则 runs/<run_name>/predictions.csv。
+evaluate_run_id: null
+# 自动检测环境：有 NVIDIA GPU 则用 CUDA，否则回退 CPU。
+device: auto
