@@ -1,0 +1,3 @@
+batch_size: 512
+# 单头分类，仅 full
+mode: full
