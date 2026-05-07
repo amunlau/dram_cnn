@@ -1,0 +1,15 @@
+# 全量数据 + DDP 训练入口（与 exp_baseline 结构相同，关闭调试行数上限）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_tianchi_full_best_ddp
+  data:
+    # 全量 + 与基线共用 data.yaml 的并行策略：preprocess_workers=null 时约 60% 逻辑核参与 fork Pool（见 utils/preprocess_parallelism）
+    max_index_rows: null
+    mcelog_max_rows: null
+    # 全量训练还需在 configs/data.yaml 将 index_features_path 指向真实全量索引 CSV（仓库默认演示表仅约几十行）

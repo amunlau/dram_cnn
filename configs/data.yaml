@@ -1,0 +1,45 @@
+# 天池 DRAM 故障预测：索引表 + mcelog 时间窗口 + 空间热图（默认）或 legacy 网格
+mcelog_path: data/raw/mcelog.csv
+tickets_path: data/raw/trouble_tickets.csv
+inventory_path: data/raw/inventory.csv
+# 由天池特征流水线生成的索引表：每行 (sid, predict_time)
+index_features_path: data/index_stubs/features_5m_index_demo.csv
+
+processed_dir: data/processed
+splits_dir: data/splits
+
+# --- 网格表示（天池 132973 报告：128×32 分箱 + bank 通道 + inventory 平铺）---
+# spatial_heatmap | legacy_rc_et（后者为旧版「原始 row/col + error_type 通道」，用于小样本调试）
+grid_representation: spatial_heatmap
+row_bin_size: 1024
+col_bin_size: 32
+num_bank_channels: 16
+# 将 inventory one-hot 复制为 [F,H,W] 与 bank 热图通道拼接（Conv 首层一并卷积）；false 时写出独立 tabular.npy
+inventory_as_grid_channels: true
+# spatial 模式下默认仅累计 Read/Scrub CE（error_type 1、2）；null 表示使用默认 [1,2]
+mcelog_error_type_filter: [1, 2]
+
+# 时间窗口 [predict_time - window_seconds, predict_time)：报告推荐 6 小时
+window_seconds: 21600
+# 预测回溯 horizon（秒）：报告推荐 7 天
+label_backtrace_seconds: 604800
+label_failure_types: [1, 2, 3]
+
+# legacy 模式下的 row/col 裁剪上限（spatial 模式下忽略，改用 row/col 分箱）
+grid_max_row: 4095
+grid_max_col: 4095
+
+# 预处理多进程（Linux fork）：null = 按下方比例用 max(1, floor(os.cpu_count() * frac)) 推算进程数
+preprocess_workers: null
+# 与 preprocess_workers=null 联用：默认 0.6 ≈ 使用 60% 逻辑 CPU；基线/全量可在实验 yaml overrides.data 覆盖
+preprocess_parallel_frac: 0.6
+
+mcelog_chunk_rows: 500000
+max_index_rows: null
+mcelog_max_rows: null
+
+split_strategy: time
+time_split:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15

@@ -1,0 +1,41 @@
+batch_size: 256
+# 最大训练轮次；可被 early stopping 提前终止。
+epochs: 300
+lr: 0.001
+weight_decay: 0.0001
+num_workers: 0
+# 对总梯度 L2 范数裁剪；极不平衡 + 高 class weight 时建议开启（常见 1.0）。
+max_grad_norm: 1.0
+# GPU 训练时是否启用 cuDNN autotune（吞吐更好；与「跨设备比特级完全一致」不可兼得）。
+cudnn_benchmark: true
+# 当早停指标连续 `patience` 轮无提升时停止训练。
+patience: 50
+# 极不平衡：默认用验证集 PR-AUC（avg_precision）早停；也可用 best_f1；说明见 engine/imbalance.py 与本文件 imbalance 段。
+early_stop_metric: avg_precision
+
+imbalance:
+  # class weight=[1, w_pos] 传入 classification_loss（加权 CE / 可选 Focal）
+  use_class_weight: true
+  # inverse_freq: w_pos = min(neg/pos, cap)；极端不平衡时建议配合足够大的 cap（如 400～600）以增强正类梯度。
+  # sqrt: w_pos = min(sqrt(neg/pos), cap)；更温和。
+  weight_scheme: inverse_freq
+  # 与 positive_oversample_factor 联用时不宜过高，避免损失梯度双重放大；可 150～300。
+  positive_weight_cap: 200.0
+  # 配合过采样时常用 1.0；0 或 null 即普通加权 CE。
+  focal_gamma: 1.0
+  # 训练集内每个正样本在索引序列中出现次数（≥1）。>1 时额外追加 (factor-1) 份正样本索引，DDP 与 DistributedSampler 可用；权重仍按原始 y_train 计数。
+  positive_oversample_factor: 8
+  # 单机训练时可选：WeightedRandomSampler；DDP 下忽略（见 trainer 日志）。与过采样叠加时一般可保持 false。
+  use_weighted_sampler: false
+  # 正样本在采样权重上再乘的系数（≥1 更偏向正类）。
+  sampler_positive_boost: 1.0
+
+threshold_search:
+  enabled: true
+  min: 0.1
+  max: 0.9
+  step: 0.02
+
+ddp:
+  enabled: true
+  nproc_per_node: auto

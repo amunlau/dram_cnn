@@ -1,0 +1,25 @@
+services:
+  dram2cnn:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: dram2cnn:latest
+    container_name: dev_dram2cnn
+    gpus: all
+    shm_size: 30g
+    stdin_open: true
+    tty: true
+
+    volumes:
+      - .:/root/workspace
+    ports:
+      - 9999:9999
+    working_dir: /root/workspace
+    environment:
+      - PYTHONPATH=/root/workspace/src
+      - TZ=Asia/Shanghai
+
+    # JupyterLab（新版配置项为 ServerApp.*）
+    command: >
+      jupyter lab --no-browser --ip=0.0.0.0 --port=9999 --allow-root
+      --ServerApp.token='' --ServerApp.password=''

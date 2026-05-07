@@ -1,0 +1,92 @@
+# =========================
+# Python / Build / Cache
+# =========================
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+.cache/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# Secrets / local config
+# =========================
+.env
+.env.*
+.envrc
+pip.conf
+
+# =========================
+# Data artifacts (AI/ML)
+# =========================
+data/raw/**
+data/processed/**
+data/splits/**
+!data/README.md
+!data/**/.gitkeep
+
+# =========================
+# Training / inference outputs
+# =========================
+runs/**
+outputs/*
+!outputs/README.md
+!outputs/figures/
+!outputs/tables/
+!outputs/reports/
+!outputs/notebooks/
+outputs/figures/*
+!outputs/figures/.gitkeep
+outputs/tables/*
+!outputs/tables/.gitkeep
+outputs/reports/*
+!outputs/reports/.gitkeep
+outputs/notebooks/*
+!outputs/notebooks/.gitkeep
+checkpoints/**
+logs/**
+mlruns/**
+wandb/**
+*.log
+
+!runs/.gitkeep
+!checkpoints/.gitkeep
+
+# =========================
+# Model / binary artifacts
+# =========================
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.joblib
+*.pkl
+*.h5
+*.hdf5
+
+# =========================
+# IDE / OS noise
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
