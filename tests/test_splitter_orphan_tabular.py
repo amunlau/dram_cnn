@@ -1,4 +1,4 @@
-"""切分时若 processed 无 tabular.npy，应删除 splits 下残留的 tabular_*.npy（legacy → spatial 切换）。"""
+"""切分时若 processed 无 tabular.npy，应删除 splits 下多余的 tabular_*.npy。"""
 
 from pathlib import Path
 
@@ -29,7 +29,7 @@ def test_split_by_time_removes_orphan_tabular_when_processed_has_no_tabular(tmp_
     np.save(proc / "y.npy", y)
     meta.to_csv(proc / "meta.csv", index=False)
 
-    # 模拟旧 legacy 切分遗留
+    # 模拟 splits 目录中已存在 tabular 文件、但 processed 无 tabular.npy 的情况
     np.save(spl / "tabular_train.npy", np.zeros((3, 15), dtype=np.float32))
     np.save(spl / "tabular_val.npy", np.zeros((2, 15), dtype=np.float32))
     np.save(spl / "tabular_test.npy", np.zeros((2, 15), dtype=np.float32))

@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-"""顺序执行 preprocess → validate → train → infer → evaluate。
+"""顺序执行 preprocess（含 validate）→ train → infer → evaluate。
+
+`preprocess_main` 结束时已内嵌 `validate_experiment`（与 `scripts/preprocess.sh` 一致）。
 
 用途：本地/regression 一键冒烟。**实验列表 `EXPS`** 请在运行前按需求修改
-（默认仅 `exp_baseline`）。失败时打印 traceback 并抛出异常。"""
+（默认 `exp_baseline`，已关闭 DDP 与显存 batch 探测）。若索引过期可先：`bash scripts/build_index.sh smoke`。
+"""
 
+import subprocess
 import traceback
 
-from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.pipelines.run_evaluate import main as eval_main
-from dram2cnn.pipelines.run_infer import main as infer_main
 from dram2cnn.pipelines.run_preprocess import main as preprocess_main
-from dram2cnn.pipelines.run_train import main as train_main
-from dram2cnn.utils.config import load_experiment_config
+from dram2cnn.utils.config import project_root
 
 EXPS = [
-    # 在此列出要串行跑通的实验 YAML（可复制configs/experiments/下的路径）
     "configs/experiments/exp_baseline.yaml",
 ]
+
+PROJECT_ROOT = project_root()
 
 
 def main():
@@ -25,14 +27,20 @@ def main():
     for exp in EXPS:
         print(f"===== Running {exp} =====", flush=True)
         try:
-            print(f"[{exp}] step=preprocess", flush=True)
+            print(f"[{exp}] step=preprocess (includes validate)", flush=True)
             preprocess_main(exp)
-            print(f"[{exp}] step=validate", flush=True)
-            validate_experiment(load_experiment_config(exp), require_splits=True)
-            print(f"[{exp}] step=train", flush=True)
-            train_main(exp)
-            print(f"[{exp}] step=infer", flush=True)
-            infer_main(exp)
+            print(f"[{exp}] step=train (via scripts/train.sh)", flush=True)
+            subprocess.run(
+                ["bash", str(PROJECT_ROOT / "scripts/train.sh"), exp],
+                cwd=str(PROJECT_ROOT),
+                check=True,
+            )
+            print(f"[{exp}] step=infer (via scripts/infer.sh)", flush=True)
+            subprocess.run(
+                ["bash", str(PROJECT_ROOT / "scripts/infer.sh"), exp],
+                cwd=str(PROJECT_ROOT),
+                check=True,
+            )
             print(f"[{exp}] step=evaluate", flush=True)
             eval_main(exp)
         except Exception:

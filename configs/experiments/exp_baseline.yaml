@@ -8,16 +8,24 @@ overrides:
   base:
     run_name: exp_tianchi_baseline
   data:
-    # 小样本调试行上限；并行度继承 configs/data.yaml（~60% 核），若占满机器可在此设 preprocess_workers: 1 或调低 preprocess_parallel_frac
+    # 冒烟：限制索引行与 mcelog 扫描量（须与 index_build_presets.smoke.mcelog_scan_rows=800000 一致）
     max_index_rows: 500
-    mcelog_max_rows: 80000
-    # 与旧版 notebook / 小数据调试一致：原始坐标网格 + 独立 tabular，而非 spatial_heatmap
-    grid_representation: legacy_rc_et
+    mcelog_max_rows: 800000
     window_seconds: 300
-    label_backtrace_seconds: 2592000
-    inventory_as_grid_channels: false
-  model:
-    in_channels: 3
-    grid_height: 256
-    grid_width: 256
-    tabular_dim: 15
+    label_horizon_seconds: 300
+    label_backtrace_seconds: 300
+    grid_representation: spatial_heatmap
+    inventory_as_grid_channels: true
+    index_features_path: data/index_stubs/features_5m_index_demo.csv
+  train:
+    epochs: 20
+    patience: 6
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false
+  infer:
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false

@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+# shellcheck source=lib/env_perf.sh
+source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 python3 -m dram2cnn.pipelines.run_evaluate "${1:-configs/experiments/exp_baseline.yaml}"

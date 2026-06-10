@@ -1,3 +1,7 @@
 batch_size: 512
 # 单头分类，仅 full
 mode: full
+# 推理 batch 上限可高于训练（仅 forward）；默认继承 base.gpu，此处提高 batch_size_max
+# gpu / ddp 默认见 configs/base.yaml；实验 overrides.infer.gpu / overrides.infer.ddp 可覆盖
+gpu:
+  batch_size_max: 2048

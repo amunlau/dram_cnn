@@ -11,6 +11,7 @@ def test_validate_config_rejects_wrong_tabular_dim():
             "tickets_path": __file__,
             "index_features_path": __file__,
             "window_seconds": 300,
+            "label_horizon_seconds": 300,
         },
         "model": {"tabular_dim": TABULAR_DIM + 1},
         "infer": {"mode": "full"},
@@ -26,8 +27,98 @@ def test_validate_config_accepts_matching_tabular_dim():
             "tickets_path": __file__,
             "index_features_path": __file__,
             "window_seconds": 300,
+            "label_horizon_seconds": 300,
+            "inventory_as_grid_channels": False,
         },
-        "model": {"tabular_dim": TABULAR_DIM},
+        "model": {"in_channels": 16, "tabular_dim": TABULAR_DIM},
         "infer": {"mode": "full"},
     }
     validate_config(cfg)
+
+
+def test_validate_config_rejects_spatial_in_channels_mismatch():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+            "grid_representation": "spatial_heatmap",
+            "inventory_as_grid_channels": True,
+        },
+        "model": {"in_channels": 16, "tabular_dim": 0},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="in_channels"):
+        validate_config(cfg)
+
+
+def test_validate_config_rejects_bad_early_stop_metric():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "train": {"early_stop_metric": "not_a_metric"},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="early_stop_metric"):
+        validate_config(cfg)
+
+
+def test_validate_config_rejects_bad_weight_scheme():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "train": {"imbalance": {"weight_scheme": "invalid"}},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="weight_scheme"):
+        validate_config(cfg)
+
+
+def test_validate_config_rejects_bad_time_split_ratios():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+            "split_strategy": "time",
+            "time_split": {"train_ratio": 0.5, "val_ratio": 0.3, "test_ratio": 0.3},
+        },
+        "model": {"tabular_dim": 0},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="time_split"):
+        validate_config(cfg)
+
+
+def test_validate_config_rejects_bad_merged_vram_frac():
+    cfg = {
+        "base": {"gpu": {"vram_budget_frac": 1.5}},
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "train": {},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="vram_budget_frac"):
+        validate_config(cfg)

@@ -1,9 +1,19 @@
 [project]
 name = "dram2cnn"
 version = "0.1.0"
-description = "DRAM failure prediction: Tianchi-style index + spatial heatmap or legacy row-col grids with GridCNN."
+description = "DRAM failure prediction: spatial heatmap GridCNN, parameterized index builder, Optuna HPO."
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+    "scikit-learn>=1.3",
+    "torch>=2.1",
+    "tqdm>=4.66",
+    "matplotlib>=3.7",
+    "optuna>=3.5",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

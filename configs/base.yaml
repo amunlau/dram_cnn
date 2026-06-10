@@ -14,3 +14,15 @@ infer_run_id: null
 evaluate_run_id: null
 # 自动检测环境：有 NVIDIA GPU 则用 CUDA，否则回退 CPU。
 device: auto
+
+# 全 pipeline 默认：多卡 DDP + 显存预算（train/infer 等可在各自 yaml 覆盖 gpu/ddp 子键）
+gpu:
+  auto_batch_size: true
+  vram_budget_frac: 0.8
+  vram_reserve_mib: 512
+  batch_size_min: 8
+  batch_size_max: 512
+
+ddp:
+  enabled: auto
+  nproc_per_node: auto

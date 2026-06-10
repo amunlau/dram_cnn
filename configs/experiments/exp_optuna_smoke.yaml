@@ -1,0 +1,21 @@
+# Optuna 超参搜索入口（需先 preprocess；建议基于 exp_baseline 小样本）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_optuna_smoke
+  data:
+    max_index_rows: 500
+    mcelog_max_rows: 800000
+    window_seconds: 300
+    label_horizon_seconds: 300
+    label_backtrace_seconds: 300
+    index_features_path: data/index_stubs/features_5m_index_demo.csv
+  train:
+    epochs: 40
+    patience: 8
+    # gpu / ddp 继承 base.yaml 默认（auto 多卡 + 80% 显存 batch）

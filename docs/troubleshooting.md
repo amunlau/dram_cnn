@@ -1,5 +1,23 @@
 # 常见问题
 
+## 切换 horizon / 索引后 validate 报错
+
+- **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）。  
+- **原因**：磁盘上 `data/processed` 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
+- **处理**：`rm -rf data/processed/* data/splits/*` 后，对目标实验 **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
+- **配置级预检**（尚未对该 horizon 重跑 preprocess）：**`bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml`**（跳过 manifest horizon 比对，仅检查 raw 路径与 processed 形状）。
+
+## `use_weighted_sampler` 与 `positive_oversample_factor>1` 冲突
+
+- **现象**：训练启动报 `use_weighted_sampler=true 与 positive_oversample_factor>1 互斥`。  
+- **原因**：过采样扩展了 `IndexMappedDataset` 长度，但 `WeightedRandomSampler` 权重仍按原始 `y_train` 构造，会导致过采样 silently 失效。  
+- **处理**：保持 `configs/train.yaml` 默认 **`use_weighted_sampler: false`**（与 `positive_oversample_factor: 8` 联用）。
+
+## evaluate 报 predictions 与 splits_dir 不一致
+
+- **现象**：`predictions 来自 splits_dir=... 与当前实验 ... 不一致`。  
+- **处理**：对当前实验 YAML 重跑 **`bash scripts/infer.sh ...`** 后再 **`bash scripts/evaluate.sh ...`**，或切换为生成该 predictions 的实验配置。
+
 ## `X_train.npy` 与 model 的 C/H/W 不一致
 
 重跑 `bash scripts/preprocess.sh <实验 yaml>`，并确认 `configs/model.yaml` 的 `grid_height/grid_width/in_channels` 与 `preprocess_manifest.json` 一致。
@@ -25,48 +43,85 @@
 
 ## `tabular_*.npy` 缺失或与 `model.tabular_dim` 不一致
 
-- **`spatial_heatmap` + `inventory_as_grid_channels: true`**：预处理**不写** `tabular.npy`，此时 **`model.tabular_dim` 应为 0**，切分目录下**不应**残留旧的 `tabular_*.npy`（若有则删 splits 或重跑 preprocess）。
+- **`spatial_heatmap` + `inventory_as_grid_channels: true`**：预处理**不写** `tabular.npy`，此时 **`model.tabular_dim` 应为 0**，切分目录下**不应**存在 `tabular_*.npy`（若有则删 splits 或重跑 preprocess）。
 - **`legacy_rc_et`** 或 **spatial 且 inventory 独立写入 tabular**：需要 **`tabular_*.npy`**，且 **`model.tabular_dim`** 必须等于 **`TABULAR_DIM`（15）**（与 `preprocess_manifest.json` 一致）；`load_experiment_config` 会对错误维度报错。
-- **禁止混用**：不要用 **`tabular_dim: 0`** 的训练配置去加载仍含 **`tabular_*.npy`** 的旧切分（或反之）。
+- **禁止混用**：`tabular_dim: 0` 的配置与含 **`tabular_*.npy`** 的切分目录不能搭配使用（或反之）。
 
 ## EDA Notebook 与 `data.yaml` 键名
 
 `01_eda.ipynb` 中 mcelog 分块大小应使用 **`mcelog_chunk_rows`**（与 `configs/data.yaml` 一致，勿用 `mcelog_chunksize`）。Notebook 按该大小**分块流式读取直至文件末尾**，汇总 `error_type` 至 `outputs/tables/eda_mcelog_summary.csv`（全文件统计；`mcelog_chunk_rows` 只影响单次读入行数）。
 
-## Notebook 已保存的旧报错 / 误导性输出
+## Notebook 单元格输出与源码不一致
 
-Jupyter 会持久化单元格输出；若曾用旧版代码或本地改过 `validate_config`，可能仍显示 **`window_days`** 等已不存在的报错。**建议**：对有关 Notebook 执行「清除输出」或运行仓库内已批量清理过的版本；当前校验只使用 **`data.window_seconds`**。
+Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符的 traceback，请 **Kernel → Restart** 后自上而下重新执行，或使用菜单 **「清除所有输出」** 后再跑。配置校验使用 **`data.window_seconds`**。
 
 ## `03_error_analysis.ipynb` 仅分析已有 `predictions.csv`
 
-若已把 `predictions.csv` 放在 `runs/<run_name>/.latest_infer_session/`（或平铺目录），Notebook **不再强制** `load_experiment_config`（避免缺 `index_features_path` 时无法打开分析）。若需自动跑 preprocess/train/infer，仍会加载完整配置，此时必须齐备 `data/raw` 与索引表。
+若已把 `predictions.csv` 放在 `runs/<run_name>/.latest_infer_session/`（或平铺目录），Notebook **不会**强制 `load_experiment_config`（避免缺 `index_features_path` 时无法打开分析）。若需自动跑 preprocess/train/infer，仍会加载完整配置，此时必须齐备 `data/raw` 与索引表。
 
 ## 预处理 `pos_rate=0` 或训练日志里 AUC / PR-AUC 全是 nan
 
-- **含义**：索引行与工单打标规则对不上，或 **train/val 某一档没有正样本**，验证集上 ROC/PR 无法定义。  
-- **处理**：检查 `data.yaml` 中 `label_failure_types`、`label_backtrace_seconds` 与索引时间是否落在工单窗口内；冒烟数据可在项目根执行 **`PYTHONPATH=src python3 scripts/build_demo_index.py`** 重建 `data/index_stubs/features_5m_index_demo.csv`，再 **重跑 preprocess**（并删除旧 `data/processed`、`data/splits` 或清掉流水线 marker）。  
-- **Notebook**：`04_run_pipelines.ipynb` 中 **preflight_split_labels** 会在 train 前打印各 split 正例数；若 val 为 0，应先修数据再打训练。
+- **含义**：索引行与工单打标规则对不上，或 **train/val 某一档没有正样本**，验证集上 ROC/PR 无法定义。
+- **冒烟模式（常见、非 bug）**：`exp_baseline` 演示索引在严格 mcelog 对齐下通常仅 **2～3 条真阳性**（`pos_rate≈0.004`），时间切分后 **train/val 可能均为 0 正例**，AUC/PR 为 nan 但 **`autotune.sh` 仍可跑通**——冒烟目标是链路验证，不追求指标。
+- **全量 / 需可读指标时**：检查 `label_failure_types`、`label_horizon_seconds` 与索引时间；`mcelog_max_rows`/`mcelog_scan_rows` 须一致；重建索引：**`bash scripts/build_index.sh smoke`**（或 `full`），再重跑 preprocess。
+- **Notebook**：`04_run_pipelines.ipynb` 中 **preflight_split_labels** 会在 train 前打印各 split 正例数；全量训练前若 val 正例为 0，应修数据或调整切分策略后再训。
 
-## 索引 CSV 里 `predict_time` 与「公元 0001 年」等低年份
+## 时间与 `predict_ts`
 
-- 用 **`strftime('%Y-%m-%d')`** 在部分 Python/pandas 版本下会得到 **`1-07-16`** 而非四位年，读回 CSV 后 **`predict_time` 解析错位**，打标全错。  
-- **建议**：写入 CSV 时使用 **ISO 8601**（如 `0001-07-16T23:11:07` 或空格分隔的等价形式）；演示索引由 `scripts/build_demo_index.py` 按 ISO 写出。加载侧见 `tianchi_build.load_index_table`（`format="mixed"` 解析）。
+- **相对秒**：preprocess / build_index 会将 mcelog、tickets、索引中**全局最早** raw 时间作为 `t=0`；`meta.csv` 的 `predict_ts` 为 **≥ 0 的相对秒**（不再出现 `-6e10` 量级负数）。
+- **`predict_time` 列**：展示为 `1970-01-01` 起的 ISO 时间（= 相对秒的可读形式），由 **`bash scripts/build_index.sh smoke`** 写出；sidecar **`*.csv.stats.json`** 含 `time_axis: relative_seconds_since_global_min`。
+- **遗留索引**：若仍含「公元 0001」或公历 **2000+** 字符串，preprocess 会自动减 `t₀`（依据 sidecar / 字符串规则，非纯数值阈值）；建议重建索引后清空 `data/processed`、`data/splits` 重跑。
+- **`mcelog_max_rows` / `mcelog_scan_rows`**：冒烟模式下二者须一致（默认均为 **800000**）；不一致时 preprocess 会 **报错**。仅扫描前 N 行时 `t₀` 与 sid 边界可能不完整，全量请设为 `null`。
+- **工单 sid 无 mcelog**：索引构建会 **跳过** 无 mcelog 边界的 sid 正样本候选，避免产生全零特征窗行。
+- **勿用** `strftime('%Y-%m-%d')` 写四位年缺失的 `1-mm-dd`，会导致解析错位、`y` 全 0。
 
-## Jupyter 仍报 `window_days` 或陈旧 `validate_config`
+## 索引里 `predict_time` 不是整 5 分钟（:05/:10）
 
-- 当前仓库 **只使用 `data.window_seconds`**，源码中已无 `window_days`。  
-- **处理**：对 02/03 Notebook **先运行首格**（会 `del sys.modules` 中已加载的 `dram2cnn`），或 **Kernel → Restart** 后自上而下执行；并对 Notebook **清除输出** 避免旧 traceback 误导。
+- **含义**：本仓库索引按 **`sample_interval_seconds=300`** 在**相对时间轴**上取锚点（故障前 prefault 窗口、各 sid 的 mcelog 合法区间），**不对齐墙钟整 5 分钟**。  
+- **是否正常**：是。标签/特征窗仍按相对秒定义：`[predict_ts−W, predict_ts)` 与 `[predict_ts, predict_ts+H]`。  
+- **详情**：见 **`docs/data_processing_guide.md` §3.5.1**。若需模拟线上 cron 整点推理，需另行在索引构建阶段做墙钟 snap（当前未实现）。
+
+## Jupyter 内核缓存了已导入的 `dram2cnn` 模块
+
+- 配置校验 **只使用 `data.window_seconds`**。  
+- **处理**：对 02/03 Notebook **先运行首格**（会 `del sys.modules` 中已加载的 `dram2cnn`），或 **Kernel → Restart** 后自上而下执行；并对 Notebook **清除输出** 避免过时的 traceback 误导。
 
 ## 训练结束找不到 `checkpoints/grid_cnn.pt`
 
-- 历史问题：验证 PR-AUC 恒为 nan 时早停逻辑可能从未 `torch.save`。  
-- **当前**：`engine/trainer.py` 已用 **`best_score=-inf`**、非有限指标归一化，并在仍无文件时 **保存最后一轮权重**；若仍失败，看该次训练日志末尾是否有 rank0 报错。
+- 验证 PR-AUC 为 nan 时，早停逻辑可能跳过保存；`engine/trainer.py` 使用 **`best_score=-inf`**、非有限指标归一化，并在仍无文件时 **保存最后一轮权重**。若仍失败，查看该次训练日志末尾是否有 rank0 报错。
 
 ## `exp_full_best_ddp` 与演示索引
 
-- `exp_full_best_ddp.yaml` 仅关闭 `max_index_rows` / `mcelog_max_rows`；**`index_features_path` 仍来自 `data.yaml`**。若默认指向演示表，全量流水线仍只会用演示行数。  
-- **全量训练**：在 `data.yaml`（或实验 `overrides.data`）中把 **`index_features_path`** 指到真实全量索引 CSV，再 **重跑 preprocess**（否则 `data/processed` 与 `data/splits` 仍是旧索引规模）。  
-- **训练启动时**：rank0 会打一行 **`数据摘要`**（`log_dataset_health_for_train`），含 `index_features_path`、`preprocess_manifest` 的 `n_samples`、train/val 行数与正例数；若路径含 `index_stubs` / `features_5m_index_demo` 会 **WARNING**，避免误以为已用天池全量表。
+- `exp_full_best_ddp.yaml` 取消 `max_index_rows` / `mcelog_max_rows` 截断，但 **`index_features_path` 仍来自 `data.yaml`**。
+- 若仍指向 `data/index_stubs/` 演示表，**`run_preprocess` / `run_train` / `train_ddp.sh` 会 RuntimeError**（`assert_full_best_index_not_stub`），不会静默用 stub 跑全量。
+- **全量训练**：`bash scripts/build_index.sh full` 后，在 `data.yaml` 或实验 `overrides.data` 中把 **`index_features_path`** 指到 `data/raw/features_index_*.csv`，再 **清空并重跑 preprocess**。  
+- **训练启动时**：rank0 会打一行 **`数据摘要`**（`log_dataset_health_for_train`），含 `index_features_path`、`preprocess_manifest` 的 `n_samples`、train/val 行数与正例数；若路径含 `index_stubs` / `features_5m_index_demo` 会 **WARNING**（约 500 行），避免误以为已用天池全量表。
+
+## 预处理前缺文件 / 长时间读 mcelog 后才失败
+
+- **`run_preprocess`** 与 Notebook 均会先调用 **`check_preprocess_raw_inputs`**：在扫描 mcelog 前检查 `mcelog_path`、`tickets_path`、`index_features_path`（及可选 `inventory_path`）是否为可读文件。  
+- **处理**：确认路径存在；演示索引可 **`bash scripts/build_index.sh smoke`**。
+
+## `preprocess_manifest.json` 中 `n_empty_grids` > 0
+
+- **含义**：部分索引行的特征窗 `[predict_ts - W, predict_ts)` 在 mcelog 中无事件（sid 未出现在日志或窗口为空），对应 **`X` 行为全零**。  
+- **处理**：检查索引 sid 是否与 mcelog 覆盖一致；重建索引或缩小 `index_features_path` 至有效 sid 子集。
+
+## 推理报错「无法解析阈值文件 best_threshold.json」
+
+- **含义**：训练目录下 `best_threshold.json` 存在但 JSON 损坏或非数值；推理**不再**静默回退 0.5。  
+- **处理**：删除损坏文件（将使用默认 0.5），或从 `best_val_metrics.json` / 验证日志恢复合理阈值后重写 JSON。
+
+## `bash scripts/autotune.sh` 与多卡 DDP
+
+- autotune 通过 **`scripts/train.sh` / `scripts/infer.sh`** 启动训练与推理，继承 `base.yaml` 的 gpu/ddp 默认。默认 **`exp_baseline`** 与 **`exp_horizon_*`** 在实验 overrides 中关闭了 train/infer 的 DDP 与 auto_batch，以保持冒烟速度。  
+- 若将 `EXPS` 改为启用 DDP 的全量实验，autotune 会自动走 torchrun（≥2 卡时）。  
+- **生产多卡**：也可直接使用 **`bash scripts/train_ddp.sh`** + **`bash scripts/infer.sh`**（全量实验 YAML）。
+
+## 多卡 DDP 启动失败（NCCL / nproc 不匹配）
+
+- **`train.sh` / `infer.sh` 报错 nproc > cuda_count**：将 **`base.ddp.nproc_per_node`**（或实验 overrides）设为不超过可见 GPU 数，或调整 **`CUDA_VISIBLE_DEVICES`**。
+- **`device=cuda` 但无 GPU**：将 `base.device` 改为 `auto` 或 `cpu`，或检查驱动/CUDA 环境。
 
 ## 早停看的是哪一列？`best_f1` 与 `f1@0.5` 为何差很多？
 

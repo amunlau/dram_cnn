@@ -19,3 +19,8 @@ def dump_json(path: str | Path, obj: Any) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_json(path: str | Path) -> Any:
+    """读取 UTF-8 JSON 文件。"""
+    return json.loads(Path(path).read_text(encoding="utf-8"))

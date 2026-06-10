@@ -31,4 +31,5 @@ def classification_loss(
     class_weight=None,
     focal_gamma: float = 0.0,
 ) -> torch.Tensor:
+    """多类 CE；`focal_gamma>0` 时为 Focal Loss；`class_weight` 形状 `[num_classes]`。"""
     return _focal_nll_from_logits(logits, y, class_weight, focal_gamma)

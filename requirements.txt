@@ -6,3 +6,4 @@ torch>=2.1
 tqdm>=4.66
 matplotlib>=3.7
 pytest>=7.4
+optuna>=3.5

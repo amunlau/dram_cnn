@@ -1,9 +1,11 @@
-"""dram2cnn — 天池式 DRAM 故障二分类。
+"""dram2cnn — DRAM 故障二分类（spatial 热图 GridCNN-Deep）。
 
-包内含：`data`（预处理与切分）、`models`（GridCNN）、`engine`（训练/推理/指标）、
-`pipelines`（命令行入口）、`utils`（配置与路径）。
+包内含：`data`（`tianchi_build` 预处理、`index_builder` 索引生成、切分）、
+`models`（GridCNN-Deep）、`engine`（训练/推理/指标）、`pipelines`（preprocess/train/optuna 等）、
+`utils`（配置与路径）。
 
-使用前请在仓库根目录设置 **`export PYTHONPATH=src`**，详见根目录 `README.md` 与 `docs/`。
+默认预测 **未来 5 分钟内是否故障**（`label_horizon_seconds=300`）。
+使用前请 **`export PYTHONPATH=src`**，详见根目录 `README.md`。
 """
 
 __all__ = ["data", "models", "engine", "pipelines", "utils"]

@@ -15,9 +15,10 @@ from sklearn.model_selection import train_test_split
 
 
 def _remove_orphan_tabular_splits(splits_dir: Path) -> None:
-    """本次预处理未写出 `processed/tabular.npy` 时，删除 splits 下旧的 `tabular_*.npy`。
+    """本次预处理未写出 `processed/tabular.npy` 时，删除 splits 下多余的 `tabular_*.npy`。
 
-    避免从 legacy（独立 tabular）切到 spatial（tabular_dim=0、特征进 X）后，validate 因残留文件报错。
+    当 `tabular_dim=0`（inventory 已拼入 X 通道）时，splits 目录不应保留 tabular 切分文件，
+    否则 validate 会因维度不一致报错。
     """
     for name in ("train", "val", "test"):
         p = splits_dir / f"tabular_{name}.npy"
@@ -58,21 +59,29 @@ def normalize_split_features_by_train(splits_dir: str | Path) -> None:
         T_train = np.load(tab_train_path).astype(np.float64, copy=False)
         if T_train.ndim != 2:
             raise ValueError(f"Expected tabular_train [N,F], got {T_train.shape}")
-        tm = T_train.mean(axis=0, keepdims=True)
-        ts = T_train.std(axis=0, keepdims=True) + 1e-6
-        for name in ("train", "val", "test"):
-            tp = out / f"tabular_{name}.npy"
-            T = np.load(tp).astype(np.float64, copy=False)
-            if T.ndim != 2 or T.shape[1] != T_train.shape[1]:
-                raise ValueError(f"tabular shape mismatch {tp.name}: {T.shape} vs train {T_train.shape}")
-            Tn = ((T - tm) / ts).astype(np.float32)
-            np.save(tp, Tn)
-        stats["tabular"] = {
-            "mean_shape": list(tm.squeeze(axis=0).shape),
-            "std_shape": list(ts.squeeze(axis=0).shape),
-            "epsilon": 1e-6,
-            "note": "Per-feature mean/std from tabular_train only (one-hot friendly).",
-        }
+        is_one_hot = bool(np.all((T_train == 0) | (T_train == 1)))
+        if is_one_hot:
+            stats["tabular"] = {
+                "normalized": False,
+                "note": "Skipped per-feature normalization (one-hot tabular).",
+            }
+        else:
+            tm = T_train.mean(axis=0, keepdims=True)
+            ts = T_train.std(axis=0, keepdims=True) + 1e-6
+            for name in ("train", "val", "test"):
+                tp = out / f"tabular_{name}.npy"
+                T = np.load(tp).astype(np.float64, copy=False)
+                if T.ndim != 2 or T.shape[1] != T_train.shape[1]:
+                    raise ValueError(f"tabular shape mismatch {tp.name}: {T.shape} vs train {T_train.shape}")
+                Tn = ((T - tm) / ts).astype(np.float32)
+                np.save(tp, Tn)
+            stats["tabular"] = {
+                "mean_shape": list(tm.squeeze(axis=0).shape),
+                "std_shape": list(ts.squeeze(axis=0).shape),
+                "epsilon": 1e-6,
+                "normalized": True,
+                "note": "Per-feature mean/std from tabular_train only.",
+            }
 
     (out / "normalization_stats.json").write_text(json.dumps(stats, indent=2), encoding="utf-8")
 
@@ -94,16 +103,35 @@ def _save_split(
     meta_out.to_csv(out / f"meta_{name}.csv", index=False)
 
 
-def split_by_sid(processed_dir: str, splits_dir: str, random_state: int = 42) -> None:
-    """按 **sid** 划分 train/val/test，再归一化（同 sid 的样本只落在一个 split）。"""
-    pdir = Path(processed_dir)
+def _load_processed_arrays(pdir: Path) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, np.ndarray | None]:
+    """加载 processed 产物；缺文件时给出明确路径提示。"""
+    for name in ("X.npy", "y.npy", "meta.csv"):
+        p = pdir / name
+        if not p.is_file():
+            raise FileNotFoundError(f"缺少预处理产物 {p}；请先运行 preprocess。")
     X = np.load(pdir / "X.npy")
     y = np.load(pdir / "y.npy")
     meta = pd.read_csv(pdir / "meta.csv")
     tab_path = pdir / "tabular.npy"
     tab = np.load(tab_path) if tab_path.is_file() else None
+    return X, y, meta, tab
+
+
+def split_by_sid(processed_dir: str, splits_dir: str, random_state: int = 42) -> None:
+    """按 **sid** 划分 train/val/test（固定比例约 64% / 16% / 20%），再归一化。
+
+    先对唯一 sid 做 80/20 分出 test，再对剩余 sid 做 80/20 分出 val，等价于 sid 级 64/16/20。
+    同一 sid 的全部样本只落在一个 split 中。
+    """
+    pdir = Path(processed_dir)
+    X, y, meta, tab = _load_processed_arrays(pdir)
 
     sids = np.asarray(meta["sid"].unique().tolist(), dtype=object)
+    if len(sids) < 5:
+        raise ValueError(
+            f"split_by_sid 需要至少 5 个唯一 sid（当前 {len(sids)} 个）。"
+            "样本过少时请改用 configs 中 split_strategy: time。"
+        )
     train_sid, test_sid = train_test_split(sids, test_size=0.2, random_state=random_state)
     train_sid, val_sid = train_test_split(train_sid, test_size=0.2, random_state=random_state)
 
@@ -126,11 +154,7 @@ def split_by_time(processed_dir: str, splits_dir: str, train_ratio: float, val_r
         raise ValueError("train/val/test ratios must sum to 1.0")
 
     pdir = Path(processed_dir)
-    X = np.load(pdir / "X.npy")
-    y = np.load(pdir / "y.npy")
-    meta = pd.read_csv(pdir / "meta.csv")
-    tab_path = pdir / "tabular.npy"
-    tab = np.load(tab_path) if tab_path.is_file() else None
+    X, y, meta, tab = _load_processed_arrays(pdir)
     if "predict_ts" not in meta.columns:
         raise ValueError("meta.csv 需含 predict_ts 列（由 preprocess 写入）")
 
@@ -141,15 +165,22 @@ def split_by_time(processed_dir: str, splits_dir: str, train_ratio: float, val_r
     tab_o = tab[order] if tab is not None else None
     n = len(meta_o)
     if n < 3:
-        raise ValueError("样本过少，无法按时间切分")
+        raise ValueError("样本过少，无法按时间切分（至少需要 3 条）")
 
     n_train = max(1, int(round(n * train_ratio)))
     n_val = max(1, int(round(n * val_ratio)))
-    n_test = max(1, n - n_train - n_val)
-    if n_train + n_val + n_test > n:
+    n_test = n - n_train - n_val
+    if n_test < 1:
+        if n_train > n_val and n_train > 1:
+            n_train -= 1
+        elif n_val > 1:
+            n_val -= 1
         n_test = n - n_train - n_val
     if n_train < 1 or n_val < 1 or n_test < 1:
-        raise ValueError("时间切分比例导致某一档为空，请调整 ratio")
+        raise ValueError(
+            f"时间切分比例导致某一档为空（n={n}，ratio={train_ratio}/{val_ratio}/{test_ratio}）；"
+            "请增大 max_index_rows 或调整 time_split。"
+        )
 
     train_idx = np.arange(0, n_train)
     val_idx = np.arange(n_train, n_train + n_val)

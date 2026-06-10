@@ -1,60 +1,83 @@
-# 天池 DRAM 故障预测：索引表 + mcelog 时间窗口 + 空间热图（默认）或 legacy 网格
+# 天池 DRAM 故障预测：索引表 + mcelog 时间窗口 + 空间热图 2D-CNN
 mcelog_path: data/raw/mcelog.csv
 tickets_path: data/raw/trouble_tickets.csv
 inventory_path: data/raw/inventory.csv
 
 # ---------------------------------------------------------------------------
-# 索引表 index_features_path（决定「有多少条训练样本」，与 exp_full_best 是否取消行数上限无关）
+# 预测目标（默认：未来 5 分钟内是否发生工单级故障）
 # ---------------------------------------------------------------------------
-# 默认指向仓库内演示表 data/index_stubs/features_5m_index_demo.csv（约几十行），用于冒烟跑通 preprocess/train。
-#
-# 【真全量训练】请改为你手头的天池/自建全量索引 CSV 路径，例如：
-#   - 把赛方或特征流水线导出的全量表放到 data/raw/ 下，再写：
-#       index_features_path: data/raw/features_5m_full.csv
-#     （文件名以你实际下载为准，常见命名含 features_5m；列至少含 sid、predict_time，与天池格式一致。）
-#   - 或使用绝对路径，例如： /data/tianchi/features_5m_train.csv
-#
-# 改完后必须「从零预处理」才会用上新索引行数，否则仍沿用旧的 data/processed 与 data/splits：
-#   1）删除 data/processed/ 与 data/splits/（或只删其中内容），或删掉 runs/pipeline-logs/markers/ 里对应实验的 preprocess/validate 的 .done；
-#   2）执行：bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
-#      （或你当前使用的实验 yaml；preprocess 会读本文件合并后的 data.index_features_path。）
-#
-# 若不想改本文件，也可在实验 yaml 里写 overrides.data.index_features_path: <你的全量路径>，同样改完后需重跑 preprocess。
-#
-# 训练日志 rank0 会打印「数据摘要」；若仍指向 index_stubs 或 features_5m_index_demo 会有 WARNING，用于自检是否误用演示表。
+# 特征窗口 [predict_time - window_seconds, predict_time)：默认与预测步长一致（5 分钟）。
+window_seconds: 300
+# 标签窗口 [predict_time, predict_time + label_horizon_seconds]（闭区间）。
+# 时间轴：preprocess/build_index 将全局最早 raw 时间平移为 t=0（相对秒）；manifest 记录 time_epoch_offset_absolute。
+# 字段别名 label_backtrace_seconds；二者同时存在时以 label_horizon_seconds 为准。
+label_horizon_seconds: 300
+label_backtrace_seconds: 300
+label_failure_types: [1, 2, 3]
+
 # ---------------------------------------------------------------------------
+# 索引表 index_features_path
+# ---------------------------------------------------------------------------
+# 默认演示表由 bash scripts/build_index.sh smoke 生成（写入 features_5m_index_demo.csv）。
+# 全量 / 不同预测窗：scripts/build_index.py --mode full --label-horizon-seconds 1800 --window-seconds 1800 ...
+# 生成后在本文件或实验 yaml 的 overrides.data.index_features_path 指向对应 CSV，
+# 并删除 data/processed、data/splits 后重跑 preprocess。
 index_features_path: data/index_stubs/features_5m_index_demo.csv
+
+# ---------------------------------------------------------------------------
+# 索引生成参数（仅 scripts/build_index.py 读取；preprocess/materialize 不读此段）
+# horizon / window 以本文件顶层 data.window_seconds、label_horizon_seconds 为准（勿在此重复）
+# ---------------------------------------------------------------------------
+index_build:
+  sample_interval_seconds: 300
+  positive_prefault_seconds: 3600
+  target_positive_ratio: 0.25
+  neg_stride_multiplier: 1
+  neg_sample_strategy: uniform
+  max_neg_grid_points_per_sid: 128
+  min_neg_per_ticket_sid: 1
+  seed: 42
+
+index_build_presets:
+  # smoke 的 mcelog_scan_rows 须与冒烟实验 overrides.data.mcelog_max_rows 一致（默认 800000）
+  smoke:
+    mcelog_scan_rows: 800000
+    smoke_max_sids: 80
+    max_rows: 500
+    max_positive_candidates: 120
+    neg_sample_strategy: random
+    min_positives: 1
+    min_total_rows: 10
+  full:
+    mcelog_scan_rows: null
+    smoke_max_sids: null
+    max_rows: null
+    neg_sample_strategy: uniform
+    min_neg_per_ticket_sid: 2
+    max_neg_grid_points_per_sid: 256
 
 processed_dir: data/processed
 splits_dir: data/splits
 
-# --- 网格表示（天池 132973 报告：128×32 分箱 + bank 通道 + inventory 平铺）---
-# spatial_heatmap | legacy_rc_et（后者为旧版「原始 row/col + error_type 通道」，用于小样本调试）
+# --- 网格表示（天池 132973：128×32 分箱 + bank 通道 + inventory 平铺）---
 grid_representation: spatial_heatmap
 row_bin_size: 1024
 col_bin_size: 32
 num_bank_channels: 16
-# 将 inventory one-hot 复制为 [F,H,W] 与 bank 热图通道拼接（Conv 首层一并卷积）；false 时写出独立 tabular.npy
 inventory_as_grid_channels: true
-# spatial 模式下默认仅累计 Read/Scrub CE（error_type 1、2）；null 表示使用默认 [1,2]
 mcelog_error_type_filter: [1, 2]
 
-# 时间窗口 [predict_time - window_seconds, predict_time)：报告推荐 6 小时
-window_seconds: 21600
-# 预测回溯 horizon（秒）：报告推荐 7 天
-label_backtrace_seconds: 604800
-label_failure_types: [1, 2, 3]
-
-# legacy 模式下的 row/col 裁剪上限（spatial 模式下忽略，改用 row/col 分箱）
+# legacy 模式下的 row/col 裁剪上限（spatial 模式下忽略）
 grid_max_row: 4095
 grid_max_col: 4095
 
-# 预处理多进程（Linux fork）：null = 按下方比例用 max(1, floor(os.cpu_count() * frac)) 推算进程数
 preprocess_workers: null
-# 与 preprocess_workers=null 联用：默认 0.6 ≈ 使用 60% 逻辑 CPU；基线/全量可在实验 yaml overrides.data 覆盖
+# null 时 worker 预算 = floor(os.cpu_count() × preprocess_parallel_frac)；112 核 × 0.6 ≈ 67
+# 全量实验 exp_full_best_ddp 覆盖为 0.85；共享集群可降至 0.3 或设 preprocess_workers: 1
 preprocess_parallel_frac: 0.6
 
-mcelog_chunk_rows: 500000
+# mcelog 流式读分块行数；大内存服务器可增至 1000000（见 exp_full_best_ddp）
+mcelog_chunk_rows: 1000000
 max_index_rows: null
 mcelog_max_rows: null
 

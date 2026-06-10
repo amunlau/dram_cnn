@@ -12,11 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from dram2cnn.utils.config import label_horizon_seconds_from_dict, project_root
 from dram2cnn.utils.device import resolve_device
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
 
 
 def _check_run_dir_writable(run_dir: Path) -> None:
@@ -24,10 +21,6 @@ def _check_run_dir_writable(run_dir: Path) -> None:
     probe = run_dir / ".write_probe"
     probe.write_text("ok", encoding="utf-8")
     probe.unlink(missing_ok=True)
-
-
-def _check_device_available(device: str) -> None:
-    resolve_device(device)
 
 
 def _check_xy_shape_pair(
@@ -60,12 +53,21 @@ def _check_xy_shape_pair(
     return int(x.shape[0]), int(x.shape[1]), int(x.shape[2]), int(x.shape[3])
 
 
-def _check_preprocess_manifest(
+def _norm_cfg_path(root: Path, raw: str | None) -> Path | None:
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_absolute() else (root / p).resolve()
+
+
+def check_preprocess_manifest(
     processed_dir: Path,
     model: dict[str, Any],
     expected_chw: tuple[int, int, int],
+    data_cfg: dict[str, Any] | None = None,
+    project_root_path: Path | None = None,
 ) -> None:
-    """若存在 `preprocess_manifest.json`，则与 `model.yaml` 及磁盘上 `X.npy` 的 CHW 对齐，避免漏跑 preprocess。"""
+    """若存在 `preprocess_manifest.json`，则与 model/data 配置及磁盘上 `X.npy` 对齐，避免漏跑 preprocess。"""
     man_p = processed_dir / "preprocess_manifest.json"
     if not man_p.is_file():
         return
@@ -81,7 +83,12 @@ def _check_preprocess_manifest(
             )
         x_path = processed_dir / "X.npy"
         if x_path.is_file():
-            x = np.load(x_path, mmap_mode="r")
+            try:
+                x = np.load(x_path, mmap_mode="r")
+            except ValueError as exc:
+                raise ValueError(
+                    f"{x_path.name} 文件损坏或不完整（可能在 preprocess 中断时写入），请重跑 preprocess。"
+                ) from exc
             chw = tuple(int(x.shape[i]) for i in range(1, 4)) if x.ndim == 4 else ()
             if x.ndim == 4 and chw != (g_c, g_h, g_w):
                 raise ValueError(
@@ -95,20 +102,75 @@ def _check_preprocess_manifest(
                 f"{man_p.name} 中 tabular_dim={td_m} 与 model.tabular_dim={m_td} 不一致；请重跑 preprocess 或修正配置。"
             )
 
+    if data_cfg is not None:
+        root = project_root_path or project_root()
+
+        cfg_win = float(data_cfg["window_seconds"]) if "window_seconds" in data_cfg else None
+        cfg_hor = label_horizon_seconds_from_dict(data_cfg)
+        man_win = man.get("window_seconds")
+        man_hor = man.get("label_horizon_seconds")
+        if man_win is not None and cfg_win is not None and float(man_win) != cfg_win:
+            raise ValueError(
+                f"{man_p.name} 中 window_seconds={man_win} 与当前配置 {cfg_win} 不一致；"
+                "切换 horizon/窗口后请清空 processed/splits 并重跑 preprocess。"
+            )
+        if man_hor is not None and cfg_hor is not None and float(man_hor) != cfg_hor:
+            raise ValueError(
+                f"{man_p.name} 中 label_horizon_seconds={man_hor} 与当前配置 {cfg_hor} 不一致；"
+                "切换 horizon 实验后请清空 processed/splits 并重跑 preprocess。"
+            )
+
+        man_idx = man.get("index_features_path")
+        cfg_idx_raw = data_cfg.get("index_features_path")
+        if man_idx and cfg_idx_raw:
+            man_pth = _norm_cfg_path(root, str(man_idx))
+            cfg_pth = _norm_cfg_path(root, str(cfg_idx_raw))
+            if man_pth and cfg_pth and man_pth != cfg_pth:
+                raise ValueError(
+                    f"{man_p.name} 中 index_features_path={man_idx} 与当前配置 {cfg_idx_raw} 不一致；"
+                    "改索引路径后请重跑 preprocess。"
+                )
+
+        def _norm_mcelog_cap(raw: Any) -> int | None:
+            if raw is None or raw == "null":
+                return None
+            return int(raw)
+
+        if "mcelog_max_rows" in man:
+            man_cap = _norm_mcelog_cap(man.get("mcelog_max_rows"))
+            cfg_cap = _norm_mcelog_cap(data_cfg.get("mcelog_max_rows"))
+            if man_cap != cfg_cap:
+                raise ValueError(
+                    f"{man_p.name} 中 mcelog_max_rows={man.get('mcelog_max_rows')} "
+                    f"与当前配置 {data_cfg.get('mcelog_max_rows')} 不一致；"
+                    "切换冒烟/全量截断后请清空 processed/splits 并重跑 preprocess。"
+                )
+
 
 def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dict[str, Any]:
+    """校验实验配置与磁盘数据是否一致。
+
+    Args:
+        cfg: 合并后的实验配置 dict。
+        require_splits: True 时检查 `data/splits/` 下 train/val/test 张量形状与 tabular 语义。
+
+    Returns:
+        含 `expected_shape`、`checks.processed`、`checks.splits` 等字段的报告 dict。
+
+    Raises:
+        FileNotFoundError / ValueError: 路径缺失或 C/H/W/tabular 与 model 段不一致。
+    """
     model = cfg.get("model", {})
     expected = {
-        "in_channels": int(model.get("in_channels", 3)),
-        "grid_height": int(model.get("grid_height", 64)),
-        "grid_width": int(model.get("grid_width", 64)),
+        "in_channels": int(model.get("in_channels", 31)),
+        "grid_height": int(model.get("grid_height", 128)),
+        "grid_width": int(model.get("grid_width", 32)),
     }
 
     run_name = cfg.get("base", {}).get("run_name", "exp_tianchi_baseline")
-    run_dir = _project_root() / "runs" / run_name
+    run_dir = project_root() / "runs" / run_name
     _check_run_dir_writable(run_dir)
     configured_device = str(cfg.get("base", {}).get("device", "auto"))
-    _check_device_available(configured_device)
     resolved_device = resolve_device(configured_device)
 
     processed_dir = Path(cfg["data"]["processed_dir"])
@@ -117,19 +179,43 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
     exp_c = int(expected["in_channels"])
     exp_h = int(expected["grid_height"])
     exp_w = int(expected["grid_width"])
-    _check_preprocess_manifest(processed_dir, model, (exp_c, exp_h, exp_w))
 
     report: dict[str, Any] = {
         "run_dir": str(run_dir),
         "device": resolved_device,
         "expected_shape": expected,
         "checks": {},
+        "warnings": [],
     }
+
+    manifest_data = cfg.get("data") if require_splits else None
+    check_preprocess_manifest(
+        processed_dir,
+        model,
+        (exp_c, exp_h, exp_w),
+        data_cfg=manifest_data,
+        project_root_path=project_root(),
+    )
+
+    man_p = processed_dir / "preprocess_manifest.json"
+    if require_splits and man_p.is_file():
+        man = json.loads(man_p.read_text(encoding="utf-8"))
+        if cfg.get("data", {}).get("index_features_path") and not man.get("index_features_path"):
+            report["warnings"].append(
+                "preprocess_manifest 缺少 index_features_path（旧产物）；建议重跑 preprocess 以便校验索引路径。"
+            )
+        n_samples = int(man.get("n_samples") or 0)
+        n_empty = int(man.get("n_empty_grids") or 0)
+        if n_samples > 0 and n_empty / n_samples >= 0.5:
+            report["warnings"].append(
+                f"n_empty_grids={n_empty}/{n_samples}（{100 * n_empty / n_samples:.1f}% 样本 mcelog 窗口为空）；"
+                "冒烟截断下常见，全量训练前请确认 mcelog 与索引对齐。"
+            )
 
     x_proc = processed_dir / "X.npy"
     y_proc = processed_dir / "y.npy"
     if x_proc.exists() and y_proc.exists():
-        n, c, h, w = _check_xy_shape_pair(x_proc, y_proc, expected=None)
+        n, c, h, w = _check_xy_shape_pair(x_proc, y_proc, expected=expected)
         report["checks"]["processed"] = {"exists": True, "shape": [n, c, h, w]}
     else:
         report["checks"]["processed"] = {"exists": False}
@@ -153,7 +239,9 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
                 if t.ndim != 2 or int(t.shape[0]) != n or int(t.shape[1]) != tab_dim_cfg:
                     raise ValueError(f"{tab_path.name} 形状 {t.shape} 与期望 [N={n},F={tab_dim_cfg}] 不符")
             elif tab_path.is_file():
-                raise ValueError(f"发现 {tab_path} 但 model.tabular_dim=0，请设置 tabular_dim 或删除旧切分")
+                raise ValueError(
+                    f"发现 {tab_path} 但 model.tabular_dim=0，请设置 tabular_dim 或删除 tabular 切分文件后重跑 preprocess"
+                )
             meta_path = splits_dir / f"meta_{name}.csv"
             if meta_path.exists():
                 mdf = pd.read_csv(meta_path)
@@ -162,11 +250,25 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
                 meta_rows[name] = len(mdf)
             else:
                 meta_rows[name] = None
+        split_total = sum(int(split_shapes[name][0]) for name in ("train", "val", "test"))
+        proc_n = None
+        proc_check = report["checks"].get("processed") or {}
+        if proc_check.get("exists"):
+            proc_n = int(proc_check["shape"][0])
+        elif man_p.is_file():
+            proc_n = int(json.loads(man_p.read_text(encoding="utf-8")).get("n_samples") or 0)
+        if proc_n is not None and proc_n > 0 and split_total != proc_n:
+            raise ValueError(
+                f"splits 总行数 {split_total} 与 processed 样本数 {proc_n} 不一致；"
+                "可能 split 未完成或使用了陈旧 data/splits，请重跑 preprocess。"
+            )
         norm_stats = splits_dir / "normalization_stats.json"
         report["checks"]["splits"] = {
             "exists": True,
             "shapes": split_shapes,
             "meta_rows": meta_rows,
+            "total_rows": split_total,
+            "processed_rows": proc_n,
             "normalization_stats_exists": norm_stats.exists(),
         }
     else:

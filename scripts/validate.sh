@@ -10,11 +10,10 @@
 #   bash scripts/validate.sh
 #   bash scripts/validate.sh configs/experiments/exp_full_best_ddp.yaml
 #   bash scripts/validate.sh configs/experiments/exp_baseline.yaml --no-require-splits
-#   bash scripts/validate.sh --no-require-splits
+#   bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml
 #
 # 【参数说明】
-#   第一个参数通常是实验 YAML；若以 -- 开头（例如只有 --no-require-splits），
-#   脚本会自动补上默认 exp_baseline.yaml，再把后续标志传给 Python。
+#   实验 YAML 与 --no-require-splits 可任意顺序；未指定 YAML 时默认 exp_baseline.yaml。
 #
 # -----------------------------------------------------------------------------
 # set -euo pipefail / PYTHONPATH / cd：同 preprocess.sh。
@@ -25,13 +24,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+# shellcheck source=lib/env_perf.sh
+source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
-# 无参数 → 默认 YAML；第一个参数是选项 → 插入默认 YAML 后再展开原有参数
-if [ "$#" -eq 0 ]; then
-  set -- configs/experiments/exp_baseline.yaml
-elif [[ "${1:-}" == -* ]]; then
-  set -- configs/experiments/exp_baseline.yaml "$@"
-fi
+# 解析参数：允许多种顺序（YAML 在前/在后；--no-require-splits 任意位置），但只允许一个 YAML
+EXP_CONFIG=""
+REQUIRE_SPLITS=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-require-splits)
+      REQUIRE_SPLITS=0
+      ;;
+    -*)
+      echo "[validate.sh] 未知选项: ${arg}" >&2
+      exit 1
+      ;;
+    *)
+      if [ -n "${EXP_CONFIG}" ]; then
+        echo "[validate.sh] 只能指定一个实验 YAML，已见: ${EXP_CONFIG}，多余: ${arg}" >&2
+        exit 1
+      fi
+      EXP_CONFIG="${arg}"
+      ;;
+  esac
+done
+EXP_CONFIG="${EXP_CONFIG:-configs/experiments/exp_baseline.yaml}"
 
-python3 -m dram2cnn.pipelines.run_validate "$@"
+PY_ARGS=( "${EXP_CONFIG}" )
+if [ "${REQUIRE_SPLITS}" -eq 0 ]; then
+  PY_ARGS+=( --no-require-splits )
+fi
+python3 -m dram2cnn.pipelines.run_validate "${PY_ARGS[@]}"

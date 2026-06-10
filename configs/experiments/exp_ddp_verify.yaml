@@ -1,0 +1,22 @@
+# 多卡 DDP + 显存 batch 探测验证（继承 base.yaml 默认 gpu/ddp，短 epoch 便于 CI/手工检查）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_ddp_verify
+  data:
+    max_index_rows: 500
+    mcelog_max_rows: 800000
+    window_seconds: 300
+    label_horizon_seconds: 300
+    label_backtrace_seconds: 300
+    grid_representation: spatial_heatmap
+    inventory_as_grid_channels: true
+    index_features_path: data/index_stubs/features_5m_index_demo.csv
+  train:
+    epochs: 2
+    patience: 99

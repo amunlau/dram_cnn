@@ -25,6 +25,12 @@ def evaluate(pred_csv: str, output_json: str) -> None:
         )
     run_dir = pred_path.parent
     df = pd.read_csv(pred_path)
+    for col in ("y_true", "y_pred"):
+        if col not in df.columns:
+            raise ValueError(
+                f"predictions.csv 缺少必需列 `{col}`（当前列: {list(df.columns)}）。"
+                "请确认 infer 步骤完整执行且 checkpoint 与 splits 匹配。"
+            )
 
     # 当前预测标签对应阈值下的指标。
     y_prob_series = df["y_prob"] if "y_prob" in df.columns else None

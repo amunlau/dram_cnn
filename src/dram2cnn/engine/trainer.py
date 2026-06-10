@@ -11,6 +11,7 @@ from pathlib import Path
 import inspect
 import math
 import os
+import sys
 import time
 
 import matplotlib.pyplot as plt
@@ -35,31 +36,7 @@ from dram2cnn.models.factory import build_model
 from dram2cnn.models.losses import classification_loss
 from dram2cnn.utils.device import resolve_device
 from dram2cnn.utils.io import dump_json
-
-
-def _validate_model_input_shape(
-    model_cfg: dict, sample_shape: tuple[int, ...], tabular_shape: tuple[int, ...] | None
-) -> None:
-    if len(sample_shape) != 4:
-        raise ValueError(f"Expected 4D tensor [N,C,H,W], got shape: {sample_shape}")
-    _, c, h, w = sample_shape
-    mismatch = []
-    if int(model_cfg.get("in_channels", c)) != c:
-        mismatch.append(f"in_channels={model_cfg.get('in_channels')} != tensor C={c}")
-    if int(model_cfg.get("grid_height", h)) != h:
-        mismatch.append(f"grid_height={model_cfg.get('grid_height')} != tensor H={h}")
-    if int(model_cfg.get("grid_width", w)) != w:
-        mismatch.append(f"grid_width={model_cfg.get('grid_width')} != tensor W={w}")
-    if mismatch:
-        raise ValueError("Model/data shape mismatch: " + "; ".join(mismatch))
-    td = int(model_cfg.get("tabular_dim", 0))
-    if td > 0:
-        if tabular_shape is None or len(tabular_shape) != 2:
-            raise ValueError("model.tabular_dim>0 需要 splits 中的 tabular_train.npy [N,F]")
-        if int(tabular_shape[1]) != td:
-            raise ValueError(f"tabular F={tabular_shape[1]} != model.tabular_dim={td}")
-    elif tabular_shape is not None:
-        raise ValueError("存在 tabular 数据但 model.tabular_dim=0，请在 model.yaml 中设置 tabular_dim 与之一致")
+from dram2cnn.utils.model_shape import validate_model_input_shape
 
 
 def _collect_eval(model, loader, device):
@@ -173,6 +150,20 @@ def train_model(
     logger=None,
     rng_seed: int = 42,
 ) -> Path:
+    """训练 GridCNN-Deep 并写入 checkpoint。
+
+    Args:
+        model_cfg: `cfg["model"]`。
+        train_cfg: `cfg["train"]`（epochs、lr、imbalance、early_stop_metric 等）。
+        splits_dir: 含 `X_train.npy` 等切分张量的目录。
+        run_dir: 本次 run 产物目录；权重写入 `checkpoints/grid_cnn.pt`。
+        device: `auto` / `cpu` / `cuda`。
+        logger: rank0 可选日志器。
+        rng_seed: DataLoader / 过采样随机种子。
+
+    Returns:
+        checkpoint 文件路径。
+    """
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -216,16 +207,16 @@ def train_model(
     )
     if len(train_base) == 0 or len(val_ds) == 0:
         raise RuntimeError("Train/val split is empty. Please rerun preprocess with adjusted split settings.")
-    tab_shape = tuple(train_base.tab.shape) if train_base.tab is not None else None
-    _validate_model_input_shape(model_cfg, tuple(train_base.x.shape), tab_shape)
+    tab_shape = train_base.tab_shape
+    validate_model_input_shape(model_cfg, train_base.x_shape, tab_shape)
 
     imb_cfg = train_cfg.get("imbalance", {})
     y_train_np = np.load(f"{splits_dir}/y_train.npy")
-    pos_os_raw = imb_cfg.get("positive_oversample_factor", 1)
+    pos_os_raw = imb_cfg.get("positive_oversample_factor", 8)
     pos_os = int(pos_os_raw) if pos_os_raw is not None else 1
     idx_map = build_positive_oversample_index_map(y_train_np, pos_os)
     if idx_map.shape[0] > len(y_train_np):
-        train_ds = IndexMappedDataset(train_base.x, train_base.y, idx_map, train_base.tab)
+        train_ds = IndexMappedDataset(train_base, idx_map)
     else:
         train_ds = train_base
 
@@ -233,6 +224,12 @@ def train_model(
     if ddp_enabled:
         train_sampler = DistributedSampler(train_ds, num_replicas=world_size, rank=rank, shuffle=True)
     elif bool(imb_cfg.get("use_weighted_sampler", False)):
+        if idx_map.shape[0] > len(y_train_np):
+            raise ValueError(
+                "train.imbalance.use_weighted_sampler=true 与 positive_oversample_factor>1 互斥："
+                "WeightedRandomSampler 权重长度与 IndexMappedDataset 虚拟长度不一致，过采样会失效。"
+                "请关闭 use_weighted_sampler（推荐，见 configs/train.yaml）或设 positive_oversample_factor=1。"
+            )
         sw = compute_per_sample_weights(y_train_np, imb_cfg)
         g_ws = torch.Generator()
         g_ws.manual_seed(int(rng_seed))
@@ -254,26 +251,44 @@ def train_model(
     g_train = torch.Generator()
     g_train.manual_seed(int(rng_seed))
     use_shuffle = train_sampler is None
+
+    def _loader_kwargs() -> dict:
+        kw: dict = {
+            "num_workers": nw,
+            "pin_memory": pin_mem,
+            "persistent_workers": bool(nw > 0),
+        }
+        if nw > 0:
+            kw["prefetch_factor"] = max(2, int(train_cfg.get("prefetch_factor", 4)))
+            if sys.platform.startswith("linux"):
+                kw["multiprocessing_context"] = "fork"
+        return kw
+
     train_dl = DataLoader(
         train_ds,
         batch_size=int(train_cfg.get("batch_size", 256)),
         shuffle=use_shuffle,
         sampler=train_sampler,
-        num_workers=nw,
-        pin_memory=pin_mem,
-        persistent_workers=bool(nw > 0),
         generator=g_train if use_shuffle else None,
+        **(_loader_kwargs()),
     )
     val_dl = DataLoader(
         val_ds,
         batch_size=int(train_cfg.get("batch_size", 256)),
         shuffle=False,
-        num_workers=nw,
-        pin_memory=pin_mem,
-        persistent_workers=bool(nw > 0),
+        **(_loader_kwargs()),
     )
 
     model = build_model(model_cfg).to(dev)
+    if _is_main_process() and logger is not None:
+        # 便于对比 trial / 配置：记录 backbone 深度与参数量（GridCNN-Deep）
+        base_model = model.module if isinstance(model, DDP) else model
+        if hasattr(base_model, "count_conv_layers"):
+            logger.info(
+                "Model GridCNN-Deep: conv_layers=%d params=%d",
+                base_model.count_conv_layers(),
+                base_model.count_parameters(),
+            )
     if ddp_enabled:
         model = DDP(model, device_ids=[local_rank] if use_cuda else None)
     optim = torch.optim.Adam(
@@ -285,8 +300,8 @@ def train_model(
     if use_weight:
         class_w = compute_class_weights_tensor(y_train_np, imb_cfg).to(dev)
 
-    _fg = imb_cfg.get("focal_gamma")
-    focal_gamma = float(_fg) if _fg is not None else 0.0
+    _fg = imb_cfg.get("focal_gamma", 1.0)
+    focal_gamma = 0.0 if _fg is None else float(_fg)
 
     if _is_main_process() and logger is not None:
         logger.info(
@@ -302,10 +317,10 @@ def train_model(
             ddp_enabled,
         )
 
-    epochs = int(train_cfg.get("epochs", 12))
-    patience = int(train_cfg.get("patience", 3))
-    max_grad_norm = train_cfg.get("max_grad_norm")
-    early_stop_metric = str(train_cfg.get("early_stop_metric", "best_f1")).lower()
+    epochs = int(train_cfg.get("epochs", 300))
+    patience = int(train_cfg.get("patience", 50))
+    max_grad_norm = train_cfg.get("max_grad_norm", 1.0)
+    early_stop_metric = str(train_cfg.get("early_stop_metric", "avg_precision")).lower()
     if early_stop_metric not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
         raise ValueError("train.early_stop_metric must be one of: best_f1, roc_auc, f1_at_0p5, avg_precision")
     if _is_main_process() and logger is not None:
@@ -353,109 +368,123 @@ def train_model(
             batch_count += 1
 
         stop_now = False
+        val_failed = False
         # 各 rank 先同步到此：避免 rank0 在验证时其它 rank 已进入下一轮 train 导致 NCCL 顺序错乱。
         if ddp_enabled and _is_dist():
             dist.barrier()
 
         if _is_main_process():
-            avg_train_loss = float(running_loss / max(1, batch_count))
-            epoch_seconds = float(time.time() - t0)
-            eval_model = model.module if isinstance(model, DDP) else model
-            ys, yp, yprob = _collect_eval(eval_model, val_dl, dev)
-            m_at_05 = classification_metrics(ys, yp, yprob)
-            best_t = search_best_threshold(
-                np.asarray(ys),
-                np.asarray(yprob),
-                float(train_cfg.get("threshold_search", {}).get("min", 0.1)),
-                float(train_cfg.get("threshold_search", {}).get("max", 0.9)),
-                float(train_cfg.get("threshold_search", {}).get("step", 0.02)),
-            )
-            m_best = _metrics_at_threshold(ys, yprob, best_t["threshold"])
-
-            roc_auc_val = m_at_05.get("roc_auc")
-            ap_val = m_at_05.get("avg_precision")
-            stop_score = _early_stop_score(early_stop_metric, m_at_05, m_best, roc_auc_val, ap_val)
-            row = {
-                "epoch": ep,
-                "train_loss": avg_train_loss,
-                "lr": float(optim.param_groups[0]["lr"]),
-                "epoch_seconds": epoch_seconds,
-                "batches": int(batch_count),
-                "f1_at_0p5": m_at_05["f1"],
-                "precision_at_0p5": m_at_05["precision"],
-                "recall_at_0p5": m_at_05["recall"],
-                "accuracy_at_0p5": m_at_05["accuracy"],
-                "roc_auc": float("nan") if roc_auc_val is None else float(roc_auc_val),
-                "avg_precision": float("nan") if ap_val is None else float(ap_val),
-                "best_threshold": best_t["threshold"],
-                "best_f1": m_best["f1"],
-                "best_precision": m_best["precision"],
-                "best_recall": m_best["recall"],
-                "best_accuracy": m_best["accuracy"],
-                "early_stop_score": stop_score,
-            }
-            epoch_rows.append(row)
-            pd.DataFrame(epoch_rows).to_csv(run_dir / "epoch_metrics.csv", index=False)
-            _save_training_figures(run_dir, epoch_rows)
-
-            if logger is not None:
-                auc_log = float("nan") if roc_auc_val is None else float(roc_auc_val)
-                ap_log = float("nan") if ap_val is None else float(ap_val)
-                logger.info(
-                    "Epoch %d/%d | loss=%.6f | roc_auc=%.6f | pr_ap=%.6f | f1@0.5=%.6f | best_f1=%.6f | best_t=%.4f | "
-                    "%s=%.6f | sec=%.2f",
-                    ep,
-                    epochs,
-                    avg_train_loss,
-                    auc_log,
-                    ap_log,
-                    float(m_at_05["f1"]),
-                    float(m_best["f1"]),
-                    float(best_t["threshold"]),
-                    early_stop_metric,
-                    float(stop_score),
-                    epoch_seconds,
+            try:
+                avg_train_loss = float(running_loss / max(1, batch_count))
+                epoch_seconds = float(time.time() - t0)
+                eval_model = model.module if isinstance(model, DDP) else model
+                ys, yp, yprob = _collect_eval(eval_model, val_dl, dev)
+                m_at_05 = classification_metrics(ys, yp, yprob)
+                best_t = search_best_threshold(
+                    np.asarray(ys),
+                    np.asarray(yprob),
+                    float(train_cfg.get("threshold_search", {}).get("min", 0.1)),
+                    float(train_cfg.get("threshold_search", {}).get("max", 0.9)),
+                    float(train_cfg.get("threshold_search", {}).get("step", 0.02)),
                 )
+                m_best = _metrics_at_threshold(ys, yprob, best_t["threshold"])
 
-            if stop_score > best_score:
-                best_score = stop_score
-                bad_epochs = 0
-                state_dict = model.module.state_dict() if isinstance(model, DDP) else model.state_dict()
-                torch.save(state_dict, ckpt)
-                dump_json(
-                    run_dir / "best_val_metrics.json",
-                    {
-                        "epoch": ep,
-                        "early_stop_metric": early_stop_metric,
-                        "early_stop_score": stop_score,
-                        "metrics_at_0p5": m_at_05,
-                        "metrics_at_best_threshold": m_best,
-                        "best_threshold": best_t,
-                    },
-                )
-                pd.DataFrame({"y_true": ys, "y_pred": yp, "y_prob": yprob}).to_csv(run_dir / "val_predictions.csv", index=False)
-            else:
-                bad_epochs += 1
-                if bad_epochs >= patience:
-                    if logger is not None:
-                        logger.info(
-                            "Early stop at epoch %d: metric=%s 已连续 %d 轮无提升（patience=%d）；"
-                            "当前 best_%s=%.6f。",
-                            ep,
-                            early_stop_metric,
-                            bad_epochs,
-                            patience,
-                            early_stop_metric,
-                            float(best_score),
-                        )
-                    stop_now = True
+                roc_auc_val = m_at_05.get("roc_auc")
+                ap_val = m_at_05.get("avg_precision")
+                stop_score = _early_stop_score(early_stop_metric, m_at_05, m_best, roc_auc_val, ap_val)
+                row = {
+                    "epoch": ep,
+                    "train_loss": avg_train_loss,
+                    "lr": float(optim.param_groups[0]["lr"]),
+                    "epoch_seconds": epoch_seconds,
+                    "batches": int(batch_count),
+                    "f1_at_0p5": m_at_05["f1"],
+                    "precision_at_0p5": m_at_05["precision"],
+                    "recall_at_0p5": m_at_05["recall"],
+                    "accuracy_at_0p5": m_at_05["accuracy"],
+                    "roc_auc": float("nan") if roc_auc_val is None else float(roc_auc_val),
+                    "avg_precision": float("nan") if ap_val is None else float(ap_val),
+                    "best_threshold": best_t["threshold"],
+                    "best_f1": m_best["f1"],
+                    "best_precision": m_best["precision"],
+                    "best_recall": m_best["recall"],
+                    "best_accuracy": m_best["accuracy"],
+                    "early_stop_score": stop_score,
+                }
+                epoch_rows.append(row)
+                pd.DataFrame(epoch_rows).to_csv(run_dir / "epoch_metrics.csv", index=False)
+                _save_training_figures(run_dir, epoch_rows)
+
+                if logger is not None:
+                    auc_log = float("nan") if roc_auc_val is None else float(roc_auc_val)
+                    ap_log = float("nan") if ap_val is None else float(ap_val)
+                    logger.info(
+                        "Epoch %d/%d | loss=%.6f | roc_auc=%.6f | pr_ap=%.6f | f1@0.5=%.6f | best_f1=%.6f | best_t=%.4f | "
+                        "%s=%.6f | sec=%.2f",
+                        ep,
+                        epochs,
+                        avg_train_loss,
+                        auc_log,
+                        ap_log,
+                        float(m_at_05["f1"]),
+                        float(m_best["f1"]),
+                        float(best_t["threshold"]),
+                        early_stop_metric,
+                        float(stop_score),
+                        epoch_seconds,
+                    )
+
+                if stop_score > best_score:
+                    best_score = stop_score
+                    bad_epochs = 0
+                    state_dict = model.module.state_dict() if isinstance(model, DDP) else model.state_dict()
+                    torch.save(state_dict, ckpt)
+                    dump_json(
+                        run_dir / "best_val_metrics.json",
+                        {
+                            "epoch": ep,
+                            "early_stop_metric": early_stop_metric,
+                            "early_stop_score": stop_score,
+                            "metrics_at_0p5": m_at_05,
+                            "metrics_at_best_threshold": m_best,
+                            "best_threshold": best_t,
+                        },
+                    )
+                    pd.DataFrame({"y_true": ys, "y_pred": yp, "y_prob": yprob}).to_csv(run_dir / "val_predictions.csv", index=False)
+                else:
+                    bad_epochs += 1
+                    if bad_epochs >= patience:
+                        if logger is not None:
+                            logger.info(
+                                "Early stop at epoch %d: metric=%s 已连续 %d 轮无提升（patience=%d）；"
+                                "当前 best_%s=%.6f。",
+                                ep,
+                                early_stop_metric,
+                                bad_epochs,
+                                patience,
+                                early_stop_metric,
+                                float(best_score),
+                            )
+                        stop_now = True
+            except Exception:
+                val_failed = True
+                if logger is not None:
+                    logger.exception("Rank 0 validation failed at epoch %d; aborting training.", ep)
+                elif not ddp_enabled:
+                    raise
 
         if ddp_enabled:
+            fail_t = torch.tensor([1 if val_failed else 0], device=dev, dtype=torch.long)
+            dist.broadcast(fail_t, src=0)
+            if int(fail_t.item()) == 1:
+                raise RuntimeError(f"Rank 0 validation failed at epoch {ep}; all ranks aborting DDP training.")
             # rank0 根据验证指标决定是否早停；广播标量使所有 rank 同时 break，避免僵尸进程。
             stop_t = torch.tensor([1 if stop_now else 0], device=dev)
             dist.broadcast(stop_t, src=0)
             if int(stop_t.item()) == 1:
                 break
+        elif val_failed:
+            raise RuntimeError(f"Validation failed at epoch {ep}.")
         elif stop_now:
             break
 

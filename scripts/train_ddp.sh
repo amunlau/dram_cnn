@@ -3,8 +3,8 @@
 # dram2cnn — 多 GPU 训练入口（薄封装）
 #
 # 【做什么】
-#   内部调用同目录下的 scripts/train.sh；后者根据 YAML 里 train.ddp 与可见 GPU 数量，
-#   自动选择 torchrun 或单进程。默认实验配置偏向「全量最佳 + DDP」：exp_full_best_ddp.yaml。
+#   内部调用 scripts/train.sh；后者读取 base.yaml 的 gpu/ddp（可被实验 overrides 覆盖），
+#   自动选择 torchrun 或单进程，并按 80% 显存上限探测 batch_size。
 #
 # 【怎么用】
 #   bash scripts/train_ddp.sh
@@ -23,12 +23,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+# shellcheck source=lib/env_perf.sh
+source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 EXP_CONFIG="${1:-configs/experiments/exp_full_best_ddp.yaml}"
 
 echo "[train_ddp.sh] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<not-set, use all visible GPUs>}"
 echo "[train_ddp.sh] exp_config=${EXP_CONFIG}"
+
+# 全量 DDP 实验不应仍指向演示 stub 索引（取消 max_index_rows 不会自动换索引表）
+python3 - "${EXP_CONFIG}" <<'PY' || exit 1
+import sys
+from dram2cnn.utils.config import load_experiment_config
+from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub
+
+try:
+    cfg = load_experiment_config(sys.argv[1])
+    assert_full_best_index_not_stub(cfg, context="train_ddp.sh")
+    print(f"[train_ddp.sh] index_features_path OK: {cfg['data'].get('index_features_path')}")
+except RuntimeError as exc:
+    print(exc, file=sys.stderr)
+    raise SystemExit(1) from exc
+PY
 
 # 必须用 SCRIPT_DIR 拼出 train.sh 路径：否则在用户「不在仓库根目录」执行时会找不到 scripts/train.sh
 bash "${SCRIPT_DIR}/train.sh" "${EXP_CONFIG}"

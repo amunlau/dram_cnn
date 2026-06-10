@@ -1,0 +1,43 @@
+# Optuna 单 trial 多卡 DDP 验证（配合 exp_ddp_verify / exp_optuna_smoke 数据）
+study_name: grid_cnn_hpo_verify
+storage: null
+direction: maximize
+metric: avg_precision
+n_trials: 1
+timeout_seconds: null
+seed: 42
+trial_train:
+  epochs: 2
+  patience: 99
+  batch_size: 128
+search_space:
+  backbone_depth:
+    type: categorical
+    choices:
+      - [64, 128, 256]
+  blocks_per_stage:
+    type: categorical
+    choices: [2]
+  use_residual:
+    type: categorical
+    choices: [true]
+  conv_kernel_size:
+    type: categorical
+    choices: [3]
+  head_hidden:
+    type: int
+    low: 128
+    high: 128
+    step: 64
+  dropout:
+    type: float
+    low: 0.2
+    high: 0.2
+  lr:
+    type: loguniform
+    low: 0.001
+    high: 0.001
+  weight_decay:
+    type: loguniform
+    low: 1.0e-4
+    high: 1.0e-4

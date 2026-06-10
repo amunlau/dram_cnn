@@ -5,7 +5,7 @@
 # 【做什么】
 #   读取实验 YAML，运行与 `python3 -m dram2cnn.pipelines.run_preprocess` 相同的逻辑：
 #   生成 data/processed/（X.npy、y.npy、meta.csv、preprocess_manifest.json；tabular.npy 视配置）
-#   再写入 data/splits/，并对训练集拟合标准化（若配置启用）。
+#   再写入 data/splits/，并对训练集拟合标准化（若配置启用），最后自动 validate（与 autotune 一致）。
 #
 # 【怎么用】（可在任意当前目录执行；脚本会自动 cd 到仓库根目录）
 #   bash scripts/preprocess.sh
@@ -14,6 +14,7 @@
 #
 # 【前置条件】
 #   configs/data.yaml（及实验 YAML）里指向的 mcelog、tickets、index、inventory 等路径可读。
+#   索引表可先：bash scripts/build_index.sh smoke|full
 #
 # 【实现说明】
 #   - PYTHONPATH：必须包含仓库下的 src/，Python 才能 import dram2cnn（下面用绝对路径，避免依赖「当前目录」）。
@@ -32,6 +33,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+# shellcheck source=lib/env_perf.sh
+source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 # 模块方式运行：${1:-默认yaml} 表示「若用户未传第 1 个参数，则用默认路径」

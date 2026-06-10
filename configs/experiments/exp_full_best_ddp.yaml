@@ -1,4 +1,4 @@
-# 全量数据 + DDP 训练入口（与 exp_baseline 结构相同，关闭调试行数上限）
+# 全量数据 + 多卡 DDP 训练入口（关闭调试截断，启用高吞吐默认）
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml
@@ -9,7 +9,15 @@ overrides:
   base:
     run_name: exp_tianchi_full_best_ddp
   data:
-    # 全量 + 与基线共用 data.yaml 的并行策略：preprocess_workers=null 时约 60% 逻辑核参与 fork Pool（见 utils/preprocess_parallelism）
+    # 全量：先 bash scripts/build_index.sh full，再将 index_features_path 指向全量 CSV，例如：
+    # index_features_path: data/raw/features_index_h300s_step300s_full.csv
+    index_features_path: data/raw/features_index_h300s_step300s_full.csv
     max_index_rows: null
     mcelog_max_rows: null
-    # 全量训练还需在 configs/data.yaml 将 index_features_path 指向真实全量索引 CSV（仓库默认演示表仅约几十行）
+    # 高核数 Linux 服务器：提高预处理 fork 进程预算（112 逻辑核 × 0.85 ≈ 95 worker）
+    preprocess_parallel_frac: 0.85
+  train:
+    # GPU 训练时 DataLoader 预取（dataset 按样本 copy，适合多 worker）
+    num_workers: 8
+    prefetch_factor: 4
+    # gpu / ddp 继承 base.yaml（auto 多卡 + 80% 显存 batch）

@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from dram2cnn.utils.experiment_guards import is_stub_index_path
+
 
 def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root: Path) -> None:
     """在 validate 通过后打印：索引路径、manifest 样本数、train/val 体量与正例数；stub 索引与小 val 集告警。"""
@@ -35,8 +37,9 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             man = json.loads(man_p.read_text(encoding="utf-8"))
             n_manifest = int(man.get("n_samples", 0)) or None
             pos_rate_m = float(man.get("pos_rate", 0.0))
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            if logger is not None:
+                logger.debug("无法解析 preprocess_manifest.json: %s", exc)
 
     yt = spl_dir / "y_train.npy"
     yv = spl_dir / "y_val.npy"
@@ -61,13 +64,13 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
         pos_va,
     )
 
-    idx_s = str(idx_path).replace("\\", "/").lower()
-    if "index_stubs" in idx_s or "features_5m_index_demo" in idx_s:
+    if is_stub_index_path(idx_path):
         logger.warning(
-            "当前索引仍指向仓库内 **演示/stub CSV**（行数通常几十～百余）。"
+            "当前索引仍指向仓库内 **演示/stub CSV**（约 500 行）。"
             " `exp_full_best_ddp` 中的「全量」仅表示 **取消 max_index_rows / mcelog_max_rows 截断**，"
-            " **不会**自动替换为天池全量索引表。若要真全量训练，请在 `configs/data.yaml` 或实验 "
-            "`overrides.data.index_features_path` 中改为全量 `features_5m_*.csv` 路径后 **重跑 preprocess**。"
+            " **不会**自动替换为天池全量索引表。全量请先 `bash scripts/build_index.sh full`，再在 "
+            "`configs/data.yaml` 或实验 `overrides.data.index_features_path` 中改为 "
+            "`data/raw/features_index_*.csv` 后 **重跑 preprocess**。"
         )
 
     if n_va < 32:
@@ -84,3 +87,19 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             " 但泛化仍受限于索引行数与特征信息量。",
             n_tr,
         )
+
+    if man_p.is_file():
+        try:
+            man2 = json.loads(man_p.read_text(encoding="utf-8"))
+            n_s = int(man2.get("n_samples") or 0)
+            n_em = int(man2.get("n_empty_grids") or 0)
+            if n_s > 0 and n_em / n_s >= 0.5:
+                logger.warning(
+                    "preprocess_manifest: n_empty_grids=%d/%d（%.1f%% 样本 mcelog 窗口无事件，X 行为全零）；"
+                    "冒烟 mcelog 截断下常见；全量训练请取消 mcelog_max_rows 并确认 index 与 raw 对齐。",
+                    n_em,
+                    n_s,
+                    100.0 * n_em / n_s,
+                )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass

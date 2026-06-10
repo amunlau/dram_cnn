@@ -18,6 +18,9 @@ services:
     environment:
       - PYTHONPATH=/root/workspace/src
       - TZ=Asia/Shanghai
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
     # JupyterLab（新版配置项为 ServerApp.*）
     command: >

@@ -8,22 +8,21 @@ from __future__ import annotations
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 from dram2cnn.engine.evaluator import evaluate
-from dram2cnn.utils.config import load_experiment_config
+from dram2cnn.utils.config import load_experiment_config, project_root
+from dram2cnn.utils.experiment_guards import assert_predictions_match_experiment
 from dram2cnn.utils.run_layout import resolve_evaluate_artifact_dir
-
-
-def _project_root() -> Path:
-    """返回仓库根目录路径。"""
-    return Path(__file__).resolve().parents[3]
 
 
 def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
     """加载配置，解析预测 CSV 路径，调用 `evaluate` 写出 metrics 等。"""
     cfg = load_experiment_config(exp_config)
-    art_dir = resolve_evaluate_artifact_dir(_project_root(), cfg["base"])
+    root = project_root()
+    art_dir = resolve_evaluate_artifact_dir(root, cfg["base"])
+    assert_predictions_match_experiment(cfg, art_dir, root)
     metrics_path = art_dir / "metrics.json"
     evaluate(str(art_dir / "predictions.csv"), str(metrics_path))
     print(f"Evaluate done: {metrics_path}")
@@ -41,4 +40,8 @@ if __name__ == "__main__":
         help="实验 YAML",
     )
     args = parser.parse_args()
-    main(args.exp_config)
+    try:
+        main(args.exp_config)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

@@ -1,8 +1,29 @@
 # data/
 
-- **`raw/`**：`mcelog.csv`、`trouble_tickets.csv`、`inventory.csv`（可选，见 `inventory_path`）；全量竞赛索引表通常也放此处并由 `index_features_path` 指向。
-- **`index_stubs/`**：**小样本索引**（如 `features_5m_index_demo.csv`），`configs/data.yaml` 默认指向它。可按当前工单/mcelog 重建：`PYTHONPATH=src python3 scripts/build_demo_index.py`（保证演示流程含正负标签）。
-- **`processed/`**：`X.npy`、`y.npy`、`meta.csv`、`preprocess_manifest.json`；**`tabular.npy` 按配置可有可无**（spatial 且 inventory 拼入网格通道时常不写）。
-- **`splits/`**：按时间的 train/val/test 切分及 `normalization_stats.json`，由 `scripts/preprocess.sh` 写入。
+- **`raw/`**：`mcelog.csv`、`trouble_tickets.csv`、`inventory.csv`；全量索引表由 `bash scripts/build_index.sh full` 写入此目录。
+- **`index_stubs/`**：冒烟用小样本索引。
+  - **默认配置使用**：`features_5m_index_demo.csv`（5 分钟，`bash scripts/build_index.sh smoke`）
+  - **Horizon 对比 stub**：`features_index_h1800s_step600s_smoke.csv`、`features_index_h3600s_step1800s_smoke.csv`（由 `build_horizon_indexes.sh smoke` 生成；5 分钟条目为 `features_index_h300s_step300s_smoke.csv`，与 demo 表内容等价但文件名不同，实验 YAML 仍指向 demo 表）
+  重建：
+  ```bash
+  export PYTHONPATH=src
+  bash scripts/build_index.sh smoke
+  bash scripts/build_horizon_indexes.sh smoke   # 批量 5min/30min/1h 冒烟索引
+  ```
+- **`processed/`**：`X.npy`、`y.npy`、`meta.csv`、`preprocess_manifest.json`；**`tabular.npy` 按配置可有可无**。
+- **`splits/`**：train/val/test 切分及 `normalization_stats.json`，由 `scripts/preprocess.sh` 写入。
 
-字段与形状说明见 `docs/data_dictionary.md` 与 `docs/tianchi_pipeline.md`。
+## 索引表与设计空间
+
+| 命令 | 说明 |
+|------|------|
+| `bash scripts/build_index.sh smoke` | 推荐入口：写入 `features_5m_index_demo.csv`，~500 行 |
+| `PYTHONPATH=src python3 scripts/build_index.py --mode smoke` | 同上；自定义 horizon 时用 `--out` 指定路径 |
+| `bash scripts/build_index.sh full` 或 `build_index.py --mode full` | 全量扫描，输出至 `data/raw/features_index_h{H}s_step{S}s_full.csv` |
+| `--label-horizon-seconds 1800` | 预测「未来 30 分钟是否故障」 |
+| `--sample-interval-seconds 600` | 每 10 分钟一个预测锚点 |
+| `--window-seconds 1800` | 特征窗长度（须与实验 `window_seconds` 一致；CLI 未指定时默认等于 horizon） |
+
+生成后更新 `configs/data.yaml` 的 `index_features_path`（或实验 yaml overrides），并 **重跑 preprocess**。
+
+字段与形状见 `docs/data_dictionary.md`、`docs/data_processing_guide.md`。

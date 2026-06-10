@@ -1,0 +1,56 @@
+# Optuna 超参搜索（GridCNN-Deep 2D-CNN 设计空间）
+# 结构相关项会写入 model.*；优化器项写入 train.*
+study_name: grid_cnn_hpo
+storage: null
+direction: maximize
+metric: avg_precision  # 与 train.early_stop_metric 对齐；trial 内会写入该字段
+
+n_trials: 20
+timeout_seconds: null
+seed: 42
+
+# 每个 trial 的训练预算（可短于正式 exp，以加快搜索）
+# 注：启用 base.gpu.auto_batch_size 时，实际 batch 由显存探测覆盖（见 train.sh / run_optuna）
+trial_train:
+  epochs: 40
+  patience: 8
+  batch_size: 128
+
+search_space:
+  # stage 通道列表；长度 = stage 数，每 stage 后 MaxPool(2) 使 H/W 减半
+  backbone_depth:
+    type: categorical
+    choices:
+      - [64, 128, 256]
+      - [64, 128, 256, 256]
+      - [64, 128, 256, 384]
+      - [96, 192, 384, 384]
+  # 每 stage 内 Conv/ResBlock 个数；越大模型越深
+  blocks_per_stage:
+    type: categorical
+    choices: [1, 2, 3]
+  # 是否在 stage 内使用残差块（通道对齐时）
+  use_residual:
+    type: categorical
+    choices: [true, false]
+  conv_kernel_size:
+    type: categorical
+    choices: [3, 5]
+  head_hidden:
+    type: int
+    low: 128
+    high: 512
+    step: 64
+  dropout:
+    type: float
+    low: 0.1
+    high: 0.5
+  # tabular_fuse_dim 仅当 tabular_dim>0 时有效；默认 spatial 已把 inventory 拼入 X，故不纳入搜索
+  lr:
+    type: loguniform
+    low: 0.0001
+    high: 0.01
+  weight_decay:
+    type: loguniform
+    low: 1.0e-6
+    high: 1.0e-3

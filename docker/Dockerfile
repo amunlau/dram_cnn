@@ -21,6 +21,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # （可选）验证安装是否成功
 # RUN jupyter --version
 
-# ENV PYTHONPATH=/root/workspace/src
+ENV PYTHONPATH=/root/workspace/src
+
+WORKDIR /root/workspace
 
 CMD ["bash"]

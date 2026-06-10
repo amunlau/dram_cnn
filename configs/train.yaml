@@ -3,7 +3,9 @@ batch_size: 256
 epochs: 300
 lr: 0.001
 weight_decay: 0.0001
+# DataLoader worker：0=主进程加载（调试/网络盘更稳）；Linux + 本地盘全量训练建议 4～8（见 exp_full_best_ddp）
 num_workers: 0
+prefetch_factor: 4
 # 对总梯度 L2 范数裁剪；极不平衡 + 高 class weight 时建议开启（常见 1.0）。
 max_grad_norm: 1.0
 # GPU 训练时是否启用 cuDNN autotune（吞吐更好；与「跨设备比特级完全一致」不可兼得）。
@@ -36,6 +38,4 @@ threshold_search:
   max: 0.9
   step: 0.02
 
-ddp:
-  enabled: true
-  nproc_per_node: auto
+# gpu / ddp 默认见 configs/base.yaml；实验 overrides.train.gpu / overrides.train.ddp 可覆盖

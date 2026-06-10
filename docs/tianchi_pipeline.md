@@ -4,18 +4,16 @@
 
 ## 样本与标签
 
-- **时间戳**：`predict_time`、`failed_time`、`error_time` 经 pandas 解析后统一转为 **Unix 秒**（与 pandas `datetime64[us]`/`[ns]` 无关，避免误用 `// 10**9` 导致时间错位）。
-- **索引表**（`data.index_features_path`）：每行一条样本，至少含 `sid`, `predict_time`（与天池 `features_5m_*.csv` 一致）。可用全量表或子集（`max_index_rows`）。  
-  - 仓库默认可指向 **`data/index_stubs/features_5m_index_demo.csv`**（小样本）；按当前 `data/raw` 重建、并保证含正负样本以便冒烟训练有意义：在仓库根执行 **`PYTHONPATH=src python3 scripts/build_demo_index.py`**。  
-  - **`predict_time` 写入 CSV**：低年份（如竞赛数据中的 `0001-…`）请用 **ISO 8601 字符串**（四位年），避免 `strftime` 写成 `1-mm-dd` 导致解析错位、**`y` 全 0**。
-- **特征窗口**：`[predict_time - window_seconds, predict_time)`。默认配置对齐天池 132973 报告：**6 小时**（`window_seconds=21600`）；亦可改为 300（5 分钟）用于与旧实验对齐。
+- **时间戳**：raw CSV 经 `time_axis` 平移为 **相对秒**（全局最早 raw 时刻 = 0）；`predict_ts` 与 mcelog 事件轴一致。`preprocess_manifest.json` 含 `time_epoch_offset_absolute`。
+- **索引表**（`data.index_features_path`）：每行一条样本，至少含 `sid`, `predict_time`（**1970-01-01 起算 ISO**，读回数值即相对秒）。重建：**`bash scripts/build_index.sh smoke`**。
+- **特征窗口**：`[predict_time - window_seconds, predict_time)`。默认 **5 分钟**（`window_seconds=300`），与索引 **`sample_interval_seconds`** 一致（相对 300s 网格，非墙钟整 5 分钟，见 `data_processing_guide.md` §3.5.1）。
 - **网格表示**（`data.grid_representation`）：
   - **`spatial_heatmap`（默认）**：按 `row_bin_size`×`col_bin_size`（默认 **1024×32**）将逻辑 row/col 映射到 **H×W=128×32**（对应物理地址范围 131072×1024）；**bankid（0–15）** 作为 **16 个通道**在 bin 上累积计数，再对各通道 `log1p`。默认仅统计 **Read/Scrub CE**（`mcelog_error_type_filter: [1,2]`）。若 `inventory_as_grid_channels: true`，将 inventory **one-hot**（15 维）按通道复制为 **15×H×W**，与 16 个 bank 通道拼接，得到 **`in_channels=31`**，此时 **不写** `tabular.npy`，`model.tabular_dim=0`。若 `inventory_as_grid_channels: false`，则 **`in_channels=16`**，inventory 仍写入 `tabular.npy` 并在池化后与网格融合（`tabular_dim=15`）。
-  - **`legacy_rc_et`**（调试）：对每个窗口内事件，将 **原始 row/col** 当作网格下标，`error_type==1/2/0` 分别计入 3 个通道（见旧版说明）；坐标裁剪由 `grid_max_row/col` 与 `model.grid_height/width` 限制。
-- **inventory**：编码定义不变（`inventory_encode`）。在 spatial 且 `inventory_as_grid_channels` 时特征已进入 **X**；否则写入 `tabular.npy` 并在切分后按训练集标准化，再由 `GridCNN` 融合。
+  - **`legacy_rc_et`**（调试）：对每个窗口内事件，将 **原始 row/col** 当作网格下标，`error_type==1/2/0` 分别计入 3 个通道；坐标裁剪由 `grid_max_row/col` 与 `model.grid_height/width` 限制。
+- **inventory**：编码定义不变（`inventory_encode`）。在 spatial 且 `inventory_as_grid_channels` 时特征已进入 **X**；否则写入 `tabular.npy` 并在切分后按训练集标准化，再由 **GridCNN-Deep** 融合。
 - **变换**：网格逐 cell `log1p` 后堆成 `[C,H,W]`，再经切分阶段按训练集 **逐 (C,H,W) 位置** 标准化（见 `splitter.normalize_split_features_by_train`）。
 - **正样本规则**（对齐天池工单）：对配置的 `label_failure_types`，若存在同一 `sid` 的工单满足  
-  `predict_ts ≤ failed_ts ≤ predict_ts + label_backtrace_seconds`，则 `y=1`，否则 `0`。
+  `predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds`（字段别名 `label_backtrace_seconds`），则 `y=1`，否则 `0`。
 
 ## 配置要点（`configs/data.yaml`）
 
@@ -27,8 +25,10 @@
 | `inventory_as_grid_channels` | spatial 下是否把 inventory 拼入 **X** 的通道维 |
 | `mcelog_error_type_filter` | spatial 下计入 CE 的 `error_type` 列表（默认 `[1,2]`） |
 | `index_features_path` | 索引 CSV |
-| `window_seconds` | 例如 6h=21600 或 5min=300 |
-| `label_backtrace_seconds` | 回溯窗口（秒）；报告示例 7 天=604800 |
+| `window_seconds` | 特征窗（秒）；默认 **300**（5 分钟） |
+| `label_horizon_seconds` | 预测 horizon（秒）；默认 **300**（未来 5 分钟是否故障） |
+| `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（字段别名） |
+| `index_build` / `index_build_presets` | `scripts/build_index.py` 采样与平衡参数 |
 | `label_failure_types` | 工单类型列表，如 `[1,2,3]` |
 | `grid_max_row/col` | **legacy** 模式下 row/col 裁剪上限；spatial 下可忽略 |
 | `inventory_path` | `inventory.csv`；`null` 时 one-hot 全 0 |
@@ -42,6 +42,8 @@
 
 ## 模型（`configs/model.yaml`）
 
-- `arch: grid_cnn`
+- `arch: grid_cnn`（**GridCNN-Deep** 默认）
 - `in_channels`、`grid_height` / `grid_width` 必须与 preprocess 写出的 `X.npy` 及 `preprocess_manifest.json` 中 `grid_shape` 一致（spatial 默认 **31×128×32**）。
+- **Backbone**：`stem_channels` + 4×(`blocks_per_stage` 卷积块 + 可选残差 + MaxPool)；默认 **blocks_per_stage=2**、**use_residual=true**，约 **19 个 Conv2d**。
+- `backbone_channels`、`conv_kernel_size`、`head_hidden`、`dropout` 等可由 Optuna 搜索（`configs/hpo.yaml`）。
 - `tabular_dim`：spatial 且 inventory 已拼入网格时为 **0**；legacy 或与 spatial+独立 tabular 并存时为 **15**。

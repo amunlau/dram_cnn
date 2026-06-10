@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_experiment_config
@@ -17,6 +18,9 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", require_spli
     """加载 YAML，调用 `validate_experiment`，向 stdout 打印 JSON 报告。"""
     cfg = load_experiment_config(exp_config)
     report = validate_experiment(cfg, require_splits=require_splits)
+    warnings = report.get("warnings") or []
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
     print(json.dumps({"status": "ok", "report": report}, ensure_ascii=False, indent=2))
 
 
@@ -37,5 +41,9 @@ if __name__ == "__main__":
         help="不检查 data/splits（仅当尚未 preprocess 时使用）",
     )
     args = parser.parse_args()
-    main(args.exp_config, require_splits=not args.no_require_splits)
+    try:
+        main(args.exp_config, require_splits=not args.no_require_splits)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 

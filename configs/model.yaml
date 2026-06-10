@@ -1,18 +1,26 @@
-# row-col 计数网格上的 2D CNN（输入 [N, C, H, W]；spatial_heatmap 模式下 inventory 已拼入通道时 tabular_dim=0）
+# row-col 计数网格上的深度 2D CNN（输入 [N, C, H, W]）
 arch: grid_cnn
-# spatial_heatmap（默认）：16 bank + 15 inventory 平铺通道 = 31；legacy_rc_et：C=3（read/scrub/type0）
 in_channels: 31
-# 天池逻辑地址分箱：131072/1024=128，1024/32=32（见 docs/tianchi_pipeline.md）
 grid_height: 128
 grid_width: 32
 num_classes: 2
 
-# inventory one-hot 拼入网格通道时为 0；legacy 模式下为 TABULAR_DIM（15）
 tabular_dim: 0
 tabular_fuse_dim: 64
 
 # 由 preprocess 写入 preprocess_manifest.json，训练前校验必须与之一致
 
-backbone_channels: [32, 64, 128, 128]
+# ---------------------------------------------------------------------------
+# GridCNN-Deep backbone（参见 src/dram2cnn/models/grid_cnn.py 模块文档）
+# ---------------------------------------------------------------------------
+# 128×32 输入 → Stem → 默认 4×Stage( blocks_per_stage 个 Conv/ResBlock + MaxPool ) → GAP → MLP
+# Optuna 可搜 3～4 stage（hpo.yaml backbone_depth）
+# 默认 blocks_per_stage=2、use_residual=true → 约 19 个 Conv2d、~5.9M 参数（C=31）
+stem_channels: 64
+backbone_channels: [64, 128, 256, 256]
+blocks_per_stage: 2
+use_residual: true
+conv_kernel_size: 3
+use_batch_norm: true
 head_hidden: 256
 dropout: 0.25

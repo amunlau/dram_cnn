@@ -23,17 +23,26 @@ def load_yaml(path: str | Path) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def _resolve_path(ref: str | Path, base_dir: Path) -> Path:
-    """相对路径则相对 base_dir 解析；绝对路径原样返回（再 resolve）。"""
-    p = Path(ref)
-    if p.is_absolute():
-        return p
-    return (base_dir / p).resolve()
-
-
 def project_root() -> Path:
     """仓库根目录：本文件位于 src/dram2cnn/utils/config.py，向上 3 级到含 configs/、data/ 的根。"""
     return Path(__file__).resolve().parents[3]
+
+
+def label_horizon_seconds_from_dict(raw: dict[str, Any], *, default: float = 300.0) -> float:
+    """从 data 配置 dict 解析 label horizon（``label_horizon_seconds`` 优先，``label_backtrace_seconds`` 为别名）。"""
+    if raw.get("label_horizon_seconds") is not None:
+        return float(raw["label_horizon_seconds"])
+    if raw.get("label_backtrace_seconds") is not None:
+        return float(raw["label_backtrace_seconds"])
+    return float(default)
+
+
+def sync_label_horizon_aliases(data_cfg: dict[str, Any], *, default: float = 300.0) -> float:
+    """双向同步 horizon 别名字段，返回最终秒数。"""
+    horizon = label_horizon_seconds_from_dict(data_cfg, default=default)
+    data_cfg["label_horizon_seconds"] = horizon
+    data_cfg["label_backtrace_seconds"] = horizon
+    return horizon
 
 
 def _resolve_config_include(ref: str | Path, exp_parent: Path, root: Path) -> Path:
@@ -80,25 +89,38 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     """在返回合并配置前做强校验；失败抛异常，避免训练中途才发现路径或维度错误。
 
     与 Notebook 里 `check_preprocess_raw_inputs` 分工不同：此处要求 model/infer 等完整字段存在且合法。
+    `run_preprocess` 在加载完整配置前会先调用 `check_preprocess_raw_inputs` 做原始文件预检。
     """
     data_cfg = cfg.get("data", {})
     for k in ("mcelog_path", "tickets_path", "index_features_path"):
         p = Path(data_cfg.get(k, ""))
-        if not p.exists():
-            raise FileNotFoundError(f"Config error: `{k}` does not exist: {p}")
+        if not p.is_file():
+            raise FileNotFoundError(f"Config error: `{k}` is not a readable file: {p}")
 
     inv = data_cfg.get("inventory_path")
     if inv:
         ip = Path(inv)
-        if not ip.exists():
-            raise FileNotFoundError(f"Config error: `inventory_path` does not exist: {ip}")
+        if not ip.is_file():
+            raise FileNotFoundError(f"Config error: `inventory_path` is not a readable file: {ip}")
 
     if int(data_cfg.get("window_seconds", 0)) <= 0:
         raise ValueError("data.window_seconds must be > 0")
 
+    # label_horizon_seconds 为首选字段；label_backtrace_seconds 为同义别名
+    horizon = sync_label_horizon_aliases(data_cfg)
+    if horizon <= 0:
+        raise ValueError("data.label_horizon_seconds (或 label_backtrace_seconds) must be > 0")
+
     split_strategy = data_cfg.get("split_strategy", "time")
     if split_strategy not in {"time", "sid"}:
         raise ValueError("Config error: `split_strategy` must be one of: time, sid")
+    if split_strategy == "time":
+        ts = data_cfg.get("time_split") or {}
+        tr = float(ts.get("train_ratio", 0.7))
+        vr = float(ts.get("val_ratio", 0.15))
+        te = float(ts.get("test_ratio", 0.15))
+        if round(tr + vr + te, 5) != 1.0:
+            raise ValueError("Config error: data.time_split train/val/test ratios must sum to 1.0")
 
     infer_mode = cfg.get("infer", {}).get("mode", "full")
     if infer_mode != "full":
@@ -109,6 +131,80 @@ def validate_config(cfg: Dict[str, Any]) -> None:
         raise ValueError(
             f"Config error: model.tabular_dim={m_tab} 必须与 inventory 编码维度 TABULAR_DIM={TABULAR_DIM} 一致"
         )
+
+    model_cfg = cfg.get("model", {})
+    rep = str(data_cfg.get("grid_representation", "spatial_heatmap")).lower().strip()
+    if rep == "spatial_heatmap":
+        inv_as_grid = bool(data_cfg.get("inventory_as_grid_channels", True))
+        n_banks = int(data_cfg.get("num_bank_channels", 16))
+        expect_in = n_banks + (TABULAR_DIM if inv_as_grid else 0)
+        cfg_in = int(model_cfg.get("in_channels", expect_in))
+        if cfg_in != expect_in:
+            raise ValueError(
+                f"Config error: spatial_heatmap 期望 model.in_channels={expect_in} "
+                f"(={n_banks} bank + {TABULAR_DIM if inv_as_grid else 0} inventory)，"
+                f"当前为 {cfg_in}"
+            )
+        if not inv_as_grid and m_tab != TABULAR_DIM:
+            raise ValueError(
+                "Config error: inventory_as_grid_channels=false 时 model.tabular_dim 应为 "
+                f"{TABULAR_DIM}（inventory 独立分支）"
+            )
+        if inv_as_grid and m_tab != 0:
+            raise ValueError(
+                "Config error: inventory_as_grid_channels=true 时 model.tabular_dim 应为 0"
+            )
+
+    train_cfg = cfg.get("train", {})
+    esm = str(train_cfg.get("early_stop_metric", "avg_precision")).lower()
+    if esm not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
+        raise ValueError(
+            "Config error: train.early_stop_metric must be one of: "
+            "best_f1, roc_auc, f1_at_0p5, avg_precision"
+        )
+    imb_cfg = train_cfg.get("imbalance") or {}
+    if imb_cfg:
+        scheme = str(imb_cfg.get("weight_scheme", "inverse_freq")).lower().strip()
+        if scheme not in {"inverse_freq", "sqrt"}:
+            raise ValueError(
+                "Config error: train.imbalance.weight_scheme must be 'inverse_freq' or 'sqrt'"
+            )
+        cap = imb_cfg.get("positive_weight_cap")
+        if cap is not None and float(cap) <= 0:
+            raise ValueError("Config error: train.imbalance.positive_weight_cap must be > 0 or null")
+
+    _validate_merged_gpu_ddp(cfg, "train")
+    _validate_merged_gpu_ddp(cfg, "infer")
+
+
+def _validate_ddp_enabled_value(raw: Any, label: str) -> None:
+    if isinstance(raw, bool):
+        return
+    if str(raw).strip().lower() not in {"true", "false", "auto", "1", "0", "yes", "no"}:
+        raise ValueError(f"Config error: {label}.ddp.enabled must be true, false, or auto")
+
+
+def _validate_gpu_section(gpu_cfg: dict, label: str) -> None:
+    if not gpu_cfg:
+        return
+    frac = gpu_cfg.get("vram_budget_frac")
+    if frac is not None and not (0.0 < float(frac) <= 1.0):
+        raise ValueError(f"Config error: {label}.gpu.vram_budget_frac must be in (0, 1]")
+    bmin = gpu_cfg.get("batch_size_min")
+    bmax = gpu_cfg.get("batch_size_max")
+    if bmin is not None and int(bmin) < 1:
+        raise ValueError(f"Config error: {label}.gpu.batch_size_min must be >= 1")
+    if bmin is not None and bmax is not None and int(bmin) > int(bmax):
+        raise ValueError(f"Config error: {label}.gpu.batch_size_min must be <= batch_size_max")
+
+
+def _validate_merged_gpu_ddp(cfg: Dict[str, Any], scope: str) -> None:
+    from dram2cnn.utils.gpu_launch import merged_scope_section
+
+    gpu_cfg = merged_scope_section(cfg, "gpu", scope)
+    ddp_cfg = merged_scope_section(cfg, "ddp", scope)
+    _validate_gpu_section(gpu_cfg, f"merged {scope}")
+    _validate_ddp_enabled_value(ddp_cfg.get("enabled", "auto"), f"merged {scope}")
 
 
 def deep_update(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -129,6 +225,9 @@ def load_experiment_config(exp_path: str | Path) -> Dict[str, Any]:
     """
     exp_file = Path(exp_path).resolve()
     exp = load_yaml(exp_file)
+    missing = [k for k in ("base", "data", "model", "train", "infer") if k not in exp]
+    if missing:
+        raise ValueError(f"实验 YAML {exp_file} 缺少必需键: {', '.join(missing)}")
     exp_parent = exp_file.parent
     root = project_root()
 
@@ -144,3 +243,17 @@ def load_experiment_config(exp_path: str | Path) -> Dict[str, Any]:
     merged = _normalize_io_paths(merged, root)
     validate_config(merged)
     return merged
+
+
+def load_pipeline_config(exp_path: str | Path) -> Dict[str, Any]:
+    """加载 pipeline 运行时配置：优先 `DRAM2CNN_CONFIG_SNAPSHOT`（Optuna trial 等）。"""
+    import os
+
+    snap = os.environ.get("DRAM2CNN_CONFIG_SNAPSHOT")
+    if snap:
+        from dram2cnn.utils.io import load_json
+
+        cfg = load_json(snap)
+        validate_config(cfg)
+        return cfg
+    return load_experiment_config(exp_path)

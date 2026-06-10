@@ -6,7 +6,7 @@
 
 ## 1. 任务设定与术语
 
-**预测目标**：在已知服务器标识 `sid`、锚点时刻 `predict_time` 的前提下，判断该服务器在随后一段 **配置的回溯时间** 内是否会出现 **符合筛选条件的故障工单**（二分类标签 `y∈{0,1}`）。
+**预测目标**：在已知服务器标识 `sid`、锚点时刻 `predict_time` 的前提下，判断该服务器在随后 **`label_horizon_seconds`（默认 5 分钟）** 内是否会出现 **符合筛选条件的故障工单**（二分类标签 `y∈{0,1}`）。
 
 **核心思想**：不把手工统计特征（如固定时间窗内的计数、MTBF 等）直接写入表格，而是先把「一段时间内的可纠正错误（CE）」在空间与类型上 **聚合为一张固定尺寸的二维网格张量**（可选叠加硬件 one-hot），再交给卷积网络学习 **空间模式**；工单标签仍由业务规则从 `trouble_tickets` 对齐得到。
 
@@ -14,9 +14,10 @@
 
 | 符号 / 字段 | 含义 |
 |-------------|------|
-| `predict_time` | 样本锚点，CSV 中为可读时间字符串，预处理中解析为 Unix 秒 `predict_ts` |
+| `predict_time` | 样本锚点；CSV 中为可读 ISO 字符串（**1970-01-01 + 相对秒**）；预处理中 `predict_ts` 为 **相对秒**（全局最早 raw 时刻 = 0） |
 | `window_seconds` | 事件窗口长度（秒）。窗口为半开区间 **`[predict_ts − window_seconds, predict_ts)`**，即 **仅使用锚点时刻之前** 的日志 |
-| `label_backtrace_seconds` | 打标用回溯长度（秒）。若存在工单满足 **`predict_ts ≤ failed_ts ≤ predict_ts + label_backtrace_seconds`**，则 `y=1` |
+| `label_horizon_seconds` | 预测 horizon（秒）：**未来**多久内是否故障。默认 **300（5 分钟）** |
+| `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（字段别名） |
 | `error_type`（mcelog） | 本仓库在 spatial 默认下通常只累计 **Read CE(1)、Scrub CE(2)**；legacy 模式另含 type0 通道 |
 | `bankid` | DRAM Bank 编号（0–15），spatial 模式下作为 **通道维** 区分不同 Bank 上的错误密度 |
 
@@ -54,7 +55,7 @@
 
 ## 3. 端到端处理管线（鸟瞰）
 
-下列流程对应脚本入口 `pipelines/run_preprocess.py`：先 **物化 `processed/`**，再 **`split_by_time` 或 `split_by_sid`** 写入 `data/splits/`。
+下列流程对应 `python3 -m dram2cnn.pipelines.run_preprocess`（源码：`src/dram2cnn/pipelines/run_preprocess.py`）：先 **物化 `processed/`**，再 **`split_by_time` 或 `split_by_sid`** 写入 `data/splits/`。
 
 ```mermaid
 flowchart TB
@@ -97,15 +98,65 @@ flowchart TB
   SP --> NS
 ```
 
-**要点**：`X` 与 `y` 的第 `i` 行严格对应索引表第 `i` 行；`meta.csv` 保存 `sid`、`predict_time`、`label`、`predict_ts` 便于追溯。
+默认配置将 `window_seconds` 与 **`label_horizon_seconds`** 均设为 **300 秒（5 分钟）**：特征窗与预测目标对齐，索引按 **`sample_interval_seconds=300`** 固定步长采样（见 §3.5.1，**非**墙钟整 5 分钟对齐）。对比实验可改为 1800s、3600s 等，并配合 `scripts/build_index.py` 生成对应索引表。
+
+---
+
+## 3.5 索引表生成（`scripts/build_index.py`）
+
+索引表仅含 **`sid`, `predict_time`**，行数与正负比例由构建策略决定（**真实打标**，非 stub 随机数）：
+
+| 原则 | 实现 |
+|------|------|
+| 固定步长采样 | `sample_interval_seconds`（默认 300） |
+| 正样本增强 | 工单前 `positive_prefault_seconds`（默认 1h）内每步长一个点；打标后保留 **y=1** |
+| 近故障负样本 | prefault 内 **y=0** 的点在负采样不足时**补齐**负类池 |
+| 负样本平衡 | 全量 `uniform` 均匀采样；冒烟 `random`；目标 `target_positive_ratio=0.25`（真实正样本稀少时实际 pos_rate 可能更低，由 mcelog 覆盖决定） |
+| sid 覆盖 | 负采样优先全部工单 sid，再覆盖 mcelog 其余 sid |
+| 时间范围 | 锚点 clamp 在 `[t_min+W, t_max-horizon]`；**无 mcelog 边界的工单 sid 不生成正样本** |
+| 冒烟规模 | `max_rows=500` 时负样本会补满至上限；`mcelog_scan_rows` 须与实验 `mcelog_max_rows` 一致（默认 **800000**） |
+
+### 3.5.1 `predict_time` 步长 vs 墙钟「整 5 分钟」
+
+常见做法之一是把锚点对齐到墙钟边界（如 3:05:00、3:10:00），以便模拟「每 5 分钟定时批跑推理」。**本仓库默认不采用墙钟对齐**，而采用：
+
+- **固定步长**：`sample_interval_seconds`（默认 300s），在 Unix 时间轴上等间隔取点；
+- **网格原点随 sid / 故障时刻变化**：正样本在工单失败时刻前 `positive_prefault_seconds` 内按步长密采样；负样本从该 sid 的 `t_min + window_seconds` 起按步长取点（或 random 后 snap 到相对网格）。
+
+因此索引 CSV 中 `predict_time` 的**秒分量通常不是 :00/:05/:10**，属预期行为。任务语义仍为：在锚点 `predict_ts` 用 `[predict_ts−W, predict_ts)` 的 mcelog 预测 `[predict_ts, predict_ts+H]` 内是否故障；与锚点是否墙钟对齐无关。若需与线上 cron 严格一致，可在索引构建阶段另行增加墙钟 snap（当前实现未包含）。
+
+```bash
+export PYTHONPATH=src
+bash scripts/build_index.sh smoke   # 推荐：写入 features_5m_index_demo.csv（~500 行）
+```
+
+Horizon 对比须先生成与实验 YAML 一致的索引，再更新 `index_features_path` 并 **重跑 preprocess**：
+
+```bash
+bash scripts/build_horizon_indexes.sh smoke   # 冒烟 stub → data/index_stubs/
+bash scripts/build_horizon_indexes.sh full      # 全量 → data/raw/（耗时长）
+rm -rf data/processed/* data/splits/*           # 切换 horizon/索引前清空
+bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
+```
 
 ---
 
 ## 4. 时间处理与事件窗口
 
-### 4.1 统一时间基准
+### 4.1 统一时间基准（相对秒）
 
-所有时间列经 pandas 解析后，在代码中统一转为 **Unix 秒（浮点）**，避免混用 `datetime64` 精度与错误整数除法。实现见 `tianchi_build._series_to_unix_seconds`。
+raw CSV（mcelog / tickets / 遗留索引）中的时间先解析为 **绝对 Unix 秒**，再减去全局最早时刻 `t₀`（`time_epoch_offset_absolute`，见 `preprocess_manifest.json`），得到 **相对秒**：
+
+```text
+predict_ts = t_absolute − t₀    （全数据最早事件 → 0）
+```
+
+实现见 `dram2cnn.data.time_axis` 与 `tianchi_build.materialize_dataset`。索引 CSV 的 `predict_time` 以 **1970-01-01 00:00:00 + 相对秒** 的 ISO 字符串存储（便于阅读；读回后数值即 `predict_ts`）；`build_index` 同时写入 sidecar **`*.csv.stats.json`**（`time_axis`、`time_epoch_offset_absolute`），preprocess 优先据此识别格式。**窗口、打标、时间切分**只依赖相对先后与秒级差值，与是否使用公历 1970/0001 无关。
+
+**区间约定**（实现与文档一致）：
+
+- 特征窗：**半开** `[predict_ts − W, predict_ts)`（锚点时刻的事件 **不** 进入特征）
+- 标签窗：**闭** `[predict_ts, predict_ts + H]`
 
 ### 4.2 半开区间 `[t_end − W, t_end)`
 
@@ -114,7 +165,7 @@ flowchart TB
 - **落入窗口的事件**满足：`t_end − W ≤ error_time < t_end`（实现上用 `searchsorted` 在已排序的时间数组上取切片，复杂度接近窗口内事件条数）。
 - **不使用锚点之后的日志**，避免信息泄漏；这与「在 `predict_time` 时刻做预测」的设定一致。
 
-默认配置将 `window_seconds` 设为 **6 小时（21600 秒）**（与天池 132973 分析报告中推荐的聚合尺度一致）；调试或对齐旧实验可改为 300 秒（5 分钟）。
+默认 **`window_seconds = label_horizon_seconds = 300`（5 分钟）**，特征窗与预测步长对齐；对比实验可改为 1800、3600 等并同步重建索引表。
 
 ---
 
@@ -125,7 +176,7 @@ flowchart TB
 | 模式 | 配置值 | 典型 `X` 形状（默认 model） | 适用场景 |
 |------|--------|------------------------------|----------|
 | 空间热图 + 硬件通道拼接 | `spatial_heatmap` | `[31, 128, 32]` | 全量、对齐天池 132973 空间建模报告 |
-| 原始坐标 + 误差类型通道 | `legacy_rc_et` | `[3, H, W]`（如 256×256）+ 可选 `tabular` | 小数据冒烟、与旧 notebook 对齐 |
+| 原始坐标 + 误差类型通道 | `legacy_rc_et` | `[3, H, W]`（如 256×256）+ 可选 `tabular` | 单元测试与 legacy 调试（非默认冒烟路径） |
 
 以下分述。
 
@@ -158,7 +209,7 @@ flowchart TB
 
 1. **`inventory_as_grid_channels: true`（默认）**  
    将长度为 15 的 one-hot **按通道复制到整张 H×W**（即对每个空间位置相同），得到 15 个额外通道，与 16 个 Bank 通道拼接 → **`C = 31`**。  
-   此时 **不再写出** `tabular.npy`，模型侧 **`tabular_dim = 0`**，硬件信息完全由 **卷积早期层** 与空间模式联合建模。
+   此时 **不写** `tabular.npy`，模型侧 **`tabular_dim = 0`**，硬件信息完全由 **卷积早期层** 与空间模式联合建模。
 
 2. **`inventory_as_grid_channels: false`**  
    **`X` 仅含 Bank 通道（C=16）**，inventory 仍以 **`tabular.npy`**（`[N,15]`）保存，在 **全局池化后** 与网格向量融合（`tabular_dim=15`）。
@@ -180,13 +231,13 @@ flowchart TB
 2. 对同一 `sid`，将所有候选工单的 `failed_ts` **排序**；
 3. 判断是否存在工单满足：
 
-   **`predict_ts ≤ failed_ts ≤ predict_ts + label_backtrace_seconds`**
+   **`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds`**
 
 4. 若存在则 **`y=1`**，否则 **`y=0`**。
 
 实现上使用 **`searchsorted`** 在一次顺序扫描内完成判定，避免对每条样本线性扫描全表工单（见 `merge_ticket_labels`）。
 
-默认 **`label_backtrace_seconds = 604800`（7 天）**，与常见「未来一周是否故障」预测 horizon 表述一致；可按业务缩短或延长。
+默认 **`label_horizon_seconds = 300`（5 分钟）**：若存在工单满足 **`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds`**，则 `y=1`。字段 **`label_backtrace_seconds`** 与之同义。可按业务改为 1800、3600 等，并同步重建索引表。
 
 ---
 
@@ -197,10 +248,10 @@ flowchart TB
 | `X.npy` | `float32`，形状 `[N, C, H, W]`，与 `model.yaml` 及 manifest 一致 |
 | `y.npy` | `int64`，长度 `N` |
 | `tabular.npy` | 若配置写出存在，`float32`，`[N, 15]`；spatial 且 inventory 已拼入通道时常 **不存在** |
-| `meta.csv` | 样本级元数据：`sid`，`predict_time`，`label`，`predict_ts` |
-| `preprocess_manifest.json` | **权威元数据**：`grid_shape`、`schema`、`tabular_dim`、`window_seconds`、`grid_representation`、并行是否启用等 |
+| `meta.csv` | 样本级元数据：`sid`，`predict_time`（1970 起算展示），`label`，`predict_ts`（相对秒 ≥ 0） |
+| `preprocess_manifest.json` | **权威元数据**：`grid_shape`、`schema`、`tabular_dim`、`window_seconds`、`grid_representation`、并行是否启用、`n_empty_grids`（mcelog 窗口为空的样本数）等 |
 
-**注意**：修改 **`configs/data.yaml` 或 `configs/model.yaml` 中与形状相关的项** 后，务必删除旧 `processed/`、`splits/` 并重跑预处理，否则后续 `validate` 或训练会报 **C/H/W 或 tabular 维不一致**。
+**注意**：修改 **`configs/data.yaml` 或 `configs/model.yaml` 中与形状相关的项** 后，务必**清空** `processed/`、`splits/` 并重跑预处理，否则后续 `validate` 或训练会报 **C/H/W 或 tabular 维不一致**。
 
 ---
 
@@ -225,18 +276,44 @@ flowchart TB
 
 在 **Linux** 上，(2)(3) 在满足 sid 数、样本数等阈值时可使用 **`fork` 多进程**（见 manifest 中 `preprocess_events_finalize_parallel`、`preprocess_grid_fill_parallel`）。**顺序读 CSV** 本身仍为单线程流式；非 Linux 环境为稳妥起见上述并行常关闭。
 
-并行进程数由 **`preprocess_workers`**（显式整数）或 **`null` + `preprocess_parallel_frac`**（按 `os.cpu_count()` 比例推算，**默认约 60%**，见 `dram2cnn.utils.preprocess_parallelism`）控制。
+并行进程数由 **`preprocess_workers`**（显式整数）或 **`null` + `preprocess_parallel_frac`**（按 `os.cpu_count()` 比例推算，**默认约 60%**；全量实验 **`exp_full_best_ddp` 覆盖为 0.85**）控制。各入口脚本会 `source scripts/lib/env_perf.sh`，设置 `OMP_NUM_THREADS=1` 等，避免 fork 与 BLAS 多线程叠加。
+
+**训练阶段**：`train.num_workers` / `prefetch_factor` 控制 DataLoader 预取（全量 DDP 默认 8 worker）；多卡见 `bash scripts/train_ddp.sh`。
 
 ---
 
-## 10. 与验证、训练衔接
+## 10. 下游模型：GridCNN-Deep（`configs/model.yaml`）
+
+预处理产出的 **`X`** 为固定尺寸 **`[N, C, H, W]`**（默认 **`[N, 31, 128, 32]`**）。本项目唯一模型 **GridCNN-Deep** 将其视为多通道「故障密度图像」，通过深度 2D 卷积提取空间模式后二分类。
+
+**结构概要**（实现见 `src/dram2cnn/models/grid_cnn.py`）：
+
+1. **Stem Conv**：将 31 通道映射到 `stem_channels`（默认 64）；
+2. **4×Stage（默认）**：每 stage 含 `blocks_per_stage` 个卷积/残差块 + **MaxPool(2)**，空间尺寸逐级减半（128×32 → 64×16 → … → 8×2）；Optuna 可搜 **3～4 stage**（见 `configs/hpo.yaml` 的 `backbone_depth`）；
+3. **Global Average Pooling**：将任意 stage 输出压成长度 = 末 stage 通道数的向量；
+4. **MLP 头**：Linear → ReLU → Dropout → Linear → **2 类 logits**。
+
+**与数据管道的关系**：
+
+| 配置项 | 须与预处理一致 |
+|--------|----------------|
+| `in_channels`, `grid_height`, `grid_width` | `preprocess_manifest.json` / `X.npy` |
+| `tabular_dim` | manifest 中 tabular 维；spatial 默认 inventory 已拼入通道时为 **0** |
+
+**注意**：修改 **`backbone_channels`、`blocks_per_stage`、`use_residual`** 等**仅影响模型结构**，**不必重跑 preprocess**，但**须重新训练**（checkpoint 须与当前 backbone 结构一致）。修改 **C/H/W** 相关项则须重跑 preprocess。
+
+默认 spatial 配置约 **19 个 Conv2d、~5.9M 参数**。结构超参可由 **`scripts/optuna.sh`** 搜索（见 `configs/hpo.yaml`）。
+
+---
+
+## 11. 与验证、训练衔接
 
 - **`scripts/validate.sh`**：检查配置、路径及 **processed/splits 张量形状**是否与 `model.yaml` 一致。若尚未生成切分，可使用 **`--no-require-splits`** 仅做配置级检查（见 [`troubleshooting.md`](./troubleshooting.md)）。
 - **训练**读取 `data/splits/` 下 `X_*`、`y_*` 及可选 `tabular_*`；**`tabular_dim=0`** 时 DataLoader 仅提供 `(x, y)`。
 
 ---
 
-## 11. 建议阅读顺序（新手）
+## 12. 建议阅读顺序（新手）
 
 1. 本文 **第 2–6 节**（输入与时间、标签）。  
 2. [`tianchi_pipeline.md`](./tianchi_pipeline.md)（配置字段速查）。  
@@ -247,6 +324,6 @@ flowchart TB
 
 ---
 
-## 修订说明
+## 13. 修订说明
 
-本文档随仓库默认配置（**`spatial_heatmap`、6h 窗口、7 天回溯**）编写；若你修改 `configs/data.yaml` / `experiments/*.yaml`，请以当前 **`preprocess_manifest.json`** 与 **`normalization_stats.json`** 为运行期事实来源。
+本文档随仓库默认配置（**`spatial_heatmap`、5 分钟特征窗与预测 horizon**）编写；若你修改 `configs/data.yaml` / `experiments/*.yaml`，请以当前 **`preprocess_manifest.json`** 为运行期事实来源。

@@ -1,11 +1,12 @@
-# 天池 DRAM 故障预测 · 空间热图 Grid CNN
+# 天池 DRAM 故障预测 · 空间热图 2D-CNN
 
-本仓库为 **服务器 DRAM 相关故障二分类**：在每条样本的锚点时刻 `predict_time`，用 **时间窗口内 mcelog** 与 **inventory 台账** 预测：在 `label_backtrace_seconds` 回溯窗口内是否出现符合 `failure_type` 筛选的 **工单级** 故障（与 `trouble_tickets` 对齐）。
+本仓库为 **服务器 DRAM 相关故障二分类**：在每条样本的锚点时刻 `predict_time`，用 **时间窗口内 mcelog** 与 **inventory 台账** 预测：**未来 `label_horizon_seconds` 内**是否出现符合 `failure_type` 筛选的 **工单级** 故障（与 `trouble_tickets` 对齐）。
 
-- **默认表示**（`configs/data.yaml` → `grid_representation: spatial_heatmap`）：将逻辑 **row/col 分箱** 为 **H×W=128×32**（`row_bin_size`×`col_bin_size` 默认 1024×32），**bankid 0–15** 为 **16 个通道** 累计 CE 后 `log1p`；可选将 **inventory one-hot** 平铺为 **15 个空间通道** 与 bank 热图拼接，即 **`X` 为 [N,31,128,32]**，此时尚无独立 `tabular.npy`，`model.tabular_dim=0`。
-- **调试/兼容**（`configs/experiments/exp_baseline.yaml`）：`legacy_rc_et` 为 **原始 row/col 下标 + read/scrub/type0 三通道** 等旧行为，并保留 **独立 `tabular.npy`**（`tabular_dim=15`）。
+- **默认预测目标**：**未来 5 分钟**（`label_horizon_seconds=300`）；可通过配置或不同索引表对比 30 分钟、1 小时等 horizon。
+- **默认表示**（`grid_representation: spatial_heatmap`）：逻辑 **row/col 分箱** 为 **H×W=128×32**，**bankid 0–15** 为 **16 通道** + **inventory one-hot 15 通道** → **`X` 为 [N,31,128,32]**。
+- **唯一模型**：**GridCNN-Deep** 2D-CNN；超参设计空间探索见 **`configs/hpo.yaml`** + **`scripts/optuna.sh`**（Optuna）。
 
-细字段、打标与配置见 **`docs/tianchi_pipeline.md`**；**从原始表到张量的分步说明**见 **`docs/data_processing_guide.md`**。训练/推理只读 **`data/splits/*.npy`**，不直接读 `data/raw`；**改数据或 `grid_representation` / 窗口 / 网格后须重跑 preprocess**。
+细字段见 **`docs/tianchi_pipeline.md`**、**`docs/data_processing_guide.md`**。**完整操作流程见 [`docs/user_guide.md`](docs/user_guide.md)**。训练/推理读 **`data/splits/`**；**改 horizon / 索引 / 网格后须重跑 preprocess**。
 
 ---
 
@@ -13,22 +14,19 @@
 
 | 维度 | 说明 |
 |------|------|
-| **任务** | 二分类：回溯窗口内是否出现符合条件的故障工单 |
-| **输入（预处理后）** | **`X`**：`[N,C,H,W]`；默认 **C=31**（16 bank + 15 inventory 通道）或 **legacy 下 C=3 + `tabular` [N,15]** |
-| **标签** | **`y`**∈{0,1}，由工单 `failed_time` 与 `predict_time` 按配置对齐 |
-| **模型** | **`GridCNN`**：Conv-BN-ReLU-Pool → 全局池化 →（`tabular_dim>0` 时与 tabular 融合）→ MLP 头 |
+| **任务** | 二分类：锚点之后 horizon 内是否出现符合条件的故障工单 |
+| **输入** | **`X`** `[N,C,H,W]`，默认 **C=31** |
+| **标签** | **`y`**∈{0,1}，`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds` |
+| **模型** | **GridCNN-Deep**：Stem + 默认 4 stage 残差卷积 backbone（~19 Conv；Optuna 可搜 3～4 stage）+ MLP 头 |
 
 ---
 
-## 核心概念（精简）
+## 核心概念
 
-1. **索引表**：每行一条样本，至少 **`sid`**, **`predict_time`**（解析为 Unix 秒 `predict_ts`）；行数与顺序完全由索引 CSV 决定。
-2. **事件窗口**：半开区间 **`[predict_ts − window_seconds, predict_ts)`**。默认 **`window_seconds=21600`（6h）**；`exp_baseline` 等为冒烟可用 300s。
-3. **网格 `X`**：
-   - **spatial**：仅默认累计 **`error_type`∈{1,2}**（Read/Scrub），需 `mcelog` 含 **`bankid`**（缺列则视为 0）；坐标超出分箱范围会 clip 到网格边界。
-   - **legacy**：`error_type<3`，按原始 `(row,col)` 落入网格；见 `docs/tianchi_pipeline.md`。
-4. **工单标签**：同一 `sid` 若存在 **`predict_ts ≤ failed_ts ≤ predict_ts + label_backtrace_seconds`** 且类型命中列表则 **y=1**。默认回溯 **7 天**（`604800` 秒）。
-5. **Inventory**：15 维 one-hot；拼入 **`X` 通道** 或写入 **`tabular.npy`** 由 **`inventory_as_grid_channels`** 决定。
+1. **索引表**：`(sid, predict_time)`；`predict_ts` 为 **相对秒**（全数据最早 raw 时刻 = 0）；由 **`scripts/build_index.py`** 从 `data/raw` 生成。
+2. **特征窗口**：半开区间 **`[predict_ts − window_seconds, predict_ts)`**（相对秒轴上计算）。
+3. **标签窗口**：闭区间 **`[predict_ts, predict_ts + label_horizon_seconds]`**。默认 **300s**。
+4. **索引策略**：工单前 `positive_prefault_seconds` 内密集采样 → 打标后保留真阳性；其余时段负采样（全量 `uniform`、冒烟 `random`）并尽量逼近 `target_positive_ratio`（实际 pos_rate 受 mcelog 覆盖影响，冒烟可极低）。
 
 ---
 
@@ -42,123 +40,150 @@ flowchart LR
     T[trouble_tickets.csv]
     V[inventory.csv]
   end
+  subgraph idx [索引构建]
+    B[build_index.py]
+  end
   subgraph prep [preprocess]
     M1[materialize_dataset]
   end
-  subgraph out1 [processed]
-    Xn[X.npy]
-    yn[y.npy]
-    tn["tabular.npy（可选）"]
-    meta[meta.csv]
-    man[preprocess_manifest.json]
-  end
-  subgraph spl [切分]
-    S[split_by_time / split_by_sid]
-  end
-  subgraph out2 [splits]
-    Xt[X_*.npy]
-    tt["tabular_*.npy（可选）"]
-    yt[y_*.npy]
-    norm[normalization_stats.json]
-  end
+  M --> B
+  T --> B
+  B --> I
   I --> M1
   M --> M1
   T --> M1
   V --> M1
-  M1 --> Xn --> S --> Xt
-  M1 --> yn --> S --> yt
-  M1 --> tn --> S --> tt
-  M1 --> meta
-  M1 --> man
-  S --> norm
+  M1 --> Xn[X.npy / splits]
 ```
-
-1. **`materialize_dataset`**：读 mcelog 建按 sid 时间序事件 → 按索引行填 **`X`** / 可选 **`tabular`** → `processed/`；manifest 记录 **`grid_shape`、`schema`、`tabular_dim`** 等。Linux 上可对「按 sid 排序」「填网格」并行（见 manifest 中 `preprocess_*_parallel`）；默认进程预算约 **`os.cpu_count() × 0.6`**（`configs/data.yaml` 中 `preprocess_parallel_frac`，可用 `preprocess_workers` 固定）。
-2. **切分**：仅用 train 拟合 **网格与 tabular** 的标准化（若存在 tabular）。
-3. **`train_model` / infer**：读 `splits`；**`tabular_dim=0`** 时 DataLoader 仅返回 **`x, y`**。
 
 ---
 
-## 配置与目录（速查）
+## 配置与目录
 
 | 说明 | 位置 |
 |------|------|
-| 数据与网格模式 | `configs/data.yaml`（`grid_representation`、`window_seconds`、`row_bin_size` 等） |
-| 模型输入形状 | `configs/model.yaml`（须与 **`preprocess_manifest.json` 中 `grid_shape`** 一致） |
-| 冒烟 / 全量实验 | `configs/experiments/exp_baseline.yaml`、`exp_full_best_ddp.yaml` |
-| 字段详解 | `docs/data_dictionary.md`、`docs/tianchi_pipeline.md` |
-| 排错 | `docs/troubleshooting.md` |
+| 全局 device / GPU / DDP 默认 | `configs/base.yaml` |
+| 数据 / horizon / 索引生成 | `configs/data.yaml` |
+| 训练超参 / 不平衡 | `configs/train.yaml` |
+| 推理 batch | `configs/infer.yaml` |
+| GridCNN 结构 | `configs/model.yaml` |
+| Optuna 搜索空间 | `configs/hpo.yaml` |
+| 实验入口（overrides） | `configs/experiments/*.yaml` |
 
-| 路径 | 内容 |
+| 脚本 | 用途 |
 |------|------|
-| `src/dram2cnn/` | `data/`（`tianchi_build`、`splitter`、`inventory_encode`）、`models/grid_cnn`、`engine/`、`pipelines/`、`utils/` |
-| `scripts/` | `preprocess.sh`、`validate.sh`、`train.sh`、`train_ddp.sh`、`infer.sh`、`evaluate.sh`、`build_demo_index.py` |
-| `data/processed/` | `X.npy`、`y.npy`、`meta.csv`、`preprocess_manifest.json`；**`tabular.npy` 视配置可有可无** |
-| `data/splits/` | 切分后的 `X_*`、`y_*`、可选 `tabular_*`、`normalization_stats.json` |
-| `runs/<run_name>/` | 训练/推理会话产物 |
+| `scripts/build_index.py` | 从 `data/raw` 生成索引 CSV（smoke / full，CLI 入口） |
+| `scripts/build_index.sh` | 从 `data/raw` 生成真实索引（smoke / full） |
+| `scripts/build_horizon_indexes.sh` | 批量生成 5min / 30min / 1h 对比索引 |
+| `scripts/preprocess.sh` | 预处理 + 切分（末尾 validate） |
+| `scripts/validate.sh` | 配置与 splits 校验 |
+| `scripts/train.sh` | 训练（自动 DDP + 80% 显存 batch） |
+| `scripts/infer.sh` | 推理（同上） |
+| `scripts/evaluate.sh` | 测试集指标与图表 |
+| `scripts/train_ddp.sh` | 全量多卡训练入口（调用 `train.sh`） |
+| `scripts/optuna.sh` | GridCNN-Deep 超参搜索（Optuna，trial 内 DDP） |
+| `scripts/autotune.sh` | preprocess → train → infer → evaluate 一键冒烟 |
+| `scripts/verify_ddp.sh` | 多卡 DDP 回归验证（需 ≥2 GPU） |
 
 ---
 
 ## 环境
 
-- Python ≥3.9（`pyproject.toml`），依赖见 `requirements.txt`。
-
 ```bash
 cd /path/to/workspace
 pip install -r requirements.txt
 export PYTHONPATH=src
-python -m pytest -q
+python3 -m pytest -q
 ```
 
 ---
 
 ## 推荐命令流
 
-1. 将 `mcelog.csv`、`trouble_tickets.csv`、`inventory.csv` 放入 `data/raw/`（或配置绝对路径）。
-2. 索引 CSV：`index_features_path`；演示可用 `data/index_stubs/features_5m_index_demo.csv`，全量请换真实路径。
-3. 选择实验配置；与 **默认 spatial** 不一致的旧 **`processed`/`splits`** 应删除后重跑。
-
 ```bash
 export PYTHONPATH=src
-bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
-bash scripts/validate.sh configs/experiments/exp_full_best_ddp.yaml
-bash scripts/train.sh configs/experiments/exp_full_best_ddp.yaml
+
+# 1. 生成索引（默认 5 分钟 horizon）
+bash scripts/build_index.sh smoke
+# 全量：bash scripts/build_index.sh full
+
+# 2. 预处理（含末尾 validate）→ 训练 → 推理 → 评估（完整分步见 docs/user_guide.md §5）
+bash scripts/preprocess.sh configs/experiments/exp_baseline.yaml
+# 可选：单独复查 splits/manifest 时再跑 validate.sh
+# bash scripts/validate.sh configs/experiments/exp_baseline.yaml
+bash scripts/train.sh configs/experiments/exp_baseline.yaml
+bash scripts/infer.sh configs/experiments/exp_baseline.yaml
+bash scripts/evaluate.sh configs/experiments/exp_baseline.yaml
+
+# 3. 超参搜索（需已有 splits）
+bash scripts/optuna.sh configs/experiments/exp_optuna_smoke.yaml
+
+# 4. 一键冒烟
+bash scripts/autotune.sh
+
+# 5. 多卡 DDP 回归（需 ≥2 GPU）
+bash scripts/verify_ddp.sh
 ```
 
-若尚未 preprocess、暂无 `data/splits/`，可先 **`bash scripts/validate.sh configs/experiments/exp_full_best_ddp.yaml --no-require-splits`** 仅校验配置与原始文件是否存在。
+**Horizon 对比示例**（索引与实验 YAML 须对齐）：
 
-小样本调试可用 **`exp_baseline.yaml`**（legacy + 行数上限）。多卡：`scripts/train_ddp.sh`。版本化运行目录见 `configs/base.yaml` 中 `versioned_runs`。
+```bash
+# 生成 30min/10min 步长冒烟索引（与 exp_horizon_30m.yaml 默认路径一致）
+bash scripts/build_horizon_indexes.sh smoke
+# 切换 horizon 前清空旧产物
+rm -rf data/processed/* data/splits/*
+bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
+```
 
 ---
 
-## Notebooks 与文档索引
-
-| Notebook | 用途 |
-|----------|------|
-| `01_eda.ipynb` | 原始表体量与列 |
-| `02_feature_analysis.ipynb` | `X` 粗统计 |
-| `03_error_analysis.ipynb` | 预测误差分析 |
-| `04_run_pipelines.ipynb` | 带 marker 的流水线 |
-
-详见 **`notebooks/README.md`**。分析产出默认在 **`outputs/`**（`.gitignore` 忽略生成文件）。
+## 文档索引
 
 | 文档 | 内容 |
 |------|------|
-| `docs/tianchi_pipeline.md` | 约定式规格说明（权威速查） |
-| `docs/data_processing_guide.md` | **数据集处理思路与全流程详解（新手推荐阅读）** |
-| `docs/data_dictionary.md` | 表结构与产物形状 |
-| `docs/troubleshooting.md` | C/H/W、tabular、预处理与训练常见问题 |
+| **`docs/user_guide.md`** | **使用说明（完整操作流程，推荐首读）** |
+| `docs/data_processing_guide.md` | 数据处理与索引设计 |
+| `docs/tianchi_pipeline.md` | 规格速查 |
+| `docs/project_configuration_reference.md` | 配置长篇说明 |
+| `docs/troubleshooting.md` | 排错 |
 
-演示索引重建：**`PYTHONPATH=src python3 scripts/build_demo_index.py`**。
-
----
-
-## Docker（可选）
-
-`docker/Dockerfile`：构建后挂载本仓库，容器内 **`export PYTHONPATH=src`**，并按挂载路径修改 `configs/data.yaml`。
+演示索引重建：**`bash scripts/build_index.sh smoke`**
 
 ---
 
-## 许可与引用
+## 性能与并行（Linux 高核 / 多 GPU）
 
-见 `pyproject.toml`。引用时请写明数据来源及与本仓库一致的 **样本定义、窗口与网格模式**（`preprocess_manifest.json`）。
+| 阶段 | 并行方式 | 配置 |
+|------|----------|------|
+| **预处理** | mcelog 按 sid 排序 + 填网格 `fork` Pool | `data.preprocess_parallel_frac`（默认 **0.6**；全量 `exp_full_best_ddp` **0.85**） |
+| **训练 / 推理** | 单卡或 **DDP 多卡** + 80% 显存 batch 探测 | `base.yaml` 的 `gpu` / `ddp`；`bash scripts/train.sh` / `infer.sh` |
+| **DataLoader** | 多 worker 预取 | `train.yaml` 默认 **0**；`exp_full_best_ddp` 覆盖 **8**，配合 `prefetch_factor` |
+
+脚本会自动 `source scripts/lib/env_perf.sh`（`OMP_NUM_THREADS=1` 等），避免 fork 与 BLAS 线程冲突。
+
+```bash
+# 全量 + 3 卡 DDP（示例）
+bash scripts/build_index.sh full
+# 必须在 exp_full_best_ddp.yaml（或 data.yaml）设置全量索引，并清空旧产物：
+#   index_features_path: data/raw/features_index_h300s_step300s_full.csv
+rm -rf data/processed/* data/splits/*
+bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
+CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml
+```
+
+详见 `docs/data_processing_guide.md` §9 与 `docs/project_configuration_reference.md` §5.10。
+
+---
+
+## Docker / JupyterLab
+
+仓库提供 GPU 开发容器（JupyterLab 端口 **9999**）：
+
+```bash
+docker compose up --build
+# 浏览器访问 http://localhost:9999（无 token/password，仅本地开发用）
+```
+
+容器内工作目录为 `/root/workspace`（挂载当前仓库），已设置 `PYTHONPATH=/root/workspace/src` 及 `OMP_NUM_THREADS=1` 等性能相关环境变量。终端内可直接运行 `bash scripts/autotune.sh` 等脚本。
+
+**Notebook**：浏览器中打开 `notebooks/04_run_pipelines.ipynb`，按 **冒烟测试 → 全量测试** 小节执行；说明见 [`notebooks/README.md`](notebooks/README.md) 与 [`docs/user_guide.md`](docs/user_guide.md) §12。

@@ -7,11 +7,11 @@ from __future__ import annotations
 - **`spatial_heatmap`**（天池 132973 / 2D CNN 报告默认）：按 row/col **分箱**到固定 H×W（如 128×32），
   **bankid**（0–15）作为通道维累积 CE 计数，`log1p` 后可与 inventory one-hot **按通道拼接到同一网格**
   （可选 `inventory_as_grid_channels`）；CE 类型默认仅保留 Read/Scrub（error_type 1、2）。
-- **`legacy_rc_et`**：旧版「原始 row/col 直接作为网格索引 + error_type 分通道」，用于兼容小样本调试配置。
+- **`legacy_rc_et`**：原始 row/col 直接作为网格索引 + error_type 分通道，用于小网格调试与单元测试。
 
 数据流：
-1. **索引表**：每行 `(sid, predict_time)` → `predict_ts`。
-2. **标签** `merge_ticket_labels`：`predict_ts <= failed_ts <= predict_ts + label_backtrace_seconds`。
+1. **索引表**：每行 `(sid, predict_time)` → `predict_ts`（相对秒，全局最早 raw 时刻 = 0）。
+2. **标签** `merge_ticket_labels`：`predict_ts <= failed_ts <= predict_ts + label_horizon_seconds`（字段别名 `label_backtrace_seconds`）。
 3. **窗口** `window_slice`：半开区间 `[predict_ts - window_seconds, predict_ts)`。
 4. **inventory**：见 `inventory_encode`；若拼入网格则通常不写单独 `tabular.npy`（`model.tabular_dim=0`）。
 
@@ -33,6 +33,14 @@ from dram2cnn.data.inventory_encode import (
     load_inventory_by_sid,
     stack_tabular_for_index,
 )
+from dram2cnn.data.time_axis import (
+    compute_global_time_epoch_offset,
+    relative_seconds_to_predict_time_str,
+    resolve_index_predict_ts,
+    series_to_absolute_seconds,
+    to_relative_seconds_array,
+)
+from dram2cnn.utils.config import label_horizon_seconds_from_dict
 from dram2cnn.utils.preprocess_parallelism import (
     effective_preprocess_parallel_frac_recorded,
     preprocess_workers_log_line,
@@ -52,8 +60,8 @@ def _preprocess_fork_parallel_available() -> bool:
     return sys.platform.startswith("linux")
 
 
-def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """fork Pool 子任务：处理一批全局样本行号 indices，返回 (indices, 对应 X 块)。
+def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
+    """fork Pool 子任务：处理一批全局样本行号 indices，返回 (indices, 对应 X 块, 空窗跳过数)。
 
     父进程在 pool 前设置 _WORKER_CTX；每个子进程只读 events/tabular，写本地 out 再拼回主数组。
     """
@@ -69,12 +77,14 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     sids = ctx["sids"]
     pts = ctx["pts"]
     out = np.zeros((len(indices), inch, gh, gw), dtype=np.float32)
+    n_skip = 0
     for j, ii in enumerate(indices):
         i = int(ii)
         sid = str(sids[i])
         pt = float(pts[i])
         sl = window_slice(events, sid, pt, win)
         if sl is None:
+            n_skip += 1
             continue
         if mode == "spatial":
             r, c, _e, _t, bk = sl
@@ -92,7 +102,7 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             r, c, e, _t, _bk = sl
             leg_in = int(ctx.get("legacy_in_channels", 3))
             out[j] = fill_log1p_grid(r, c, e, gh, gw, leg_in)
-    return indices.astype(np.int64), out
+    return indices.astype(np.int64), out, n_skip
 
 
 def _finalize_sid_chunk(sids: tuple[str, ...]) -> dict[str, dict[str, np.ndarray]]:
@@ -123,11 +133,43 @@ def _finalize_sid_chunk(sids: tuple[str, ...]) -> dict[str, dict[str, np.ndarray
     return out
 
 
-def _series_to_unix_seconds(s: pd.Series) -> np.ndarray:
-    """pandas 时间列（任意 datetime64 精度）→ Unix 秒 float64；无法解析为 NaN。"""
-    t = pd.to_datetime(s, errors="coerce", format="mixed")
-    sec = (t - pd.Timestamp("1970-01-01")) / pd.Timedelta(seconds=1)
-    return sec.to_numpy(dtype=np.float64)
+def failure_in_horizon(
+    predict_ts: float,
+    fail_times: np.ndarray | None,
+    horizon: float,
+) -> bool:
+    """锚点 ``predict_ts`` 的闭区间 ``[predict_ts, predict_ts + horizon]`` 内是否存在工单失败时刻。"""
+    if fail_times is None or fail_times.size == 0:
+        return False
+    lo, hi = float(predict_ts), float(predict_ts) + float(horizon)
+    j = int(np.searchsorted(fail_times, lo, side="left"))
+    return j < len(fail_times) and float(fail_times[j]) <= hi
+
+
+def load_ticket_failures(
+    tickets_path: Path,
+    failure_types: list[int],
+    time_epoch_offset: float = 0.0,
+) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """读取工单表，按 sid 聚合升序 ``failed_ts``（**相对秒**）。"""
+    if not tickets_path.is_file():
+        raise FileNotFoundError(f"tickets 文件不存在: {tickets_path}")
+    try:
+        tix = pd.read_csv(tickets_path, low_memory=False)
+    except pd.errors.ParserError as exc:
+        raise RuntimeError(f"无法解析 tickets CSV {tickets_path}: {exc}") from exc
+    for col in ("sid", "failure_type", "failed_time"):
+        if col not in tix.columns:
+            raise ValueError(f"tickets 需含 `{col}`，当前: {list(tix.columns)}")
+    ft_set = set(int(x) for x in failure_types)
+    tix = tix[tix["failure_type"].isin(ft_set)].copy()
+    tix["sid"] = tix["sid"].astype(str)
+    tix["failed_ts"] = series_to_absolute_seconds(tix["failed_time"]) - float(time_epoch_offset)
+    tix = tix.dropna(subset=["failed_ts"])
+    by_sid: dict[str, np.ndarray] = {}
+    for sid, g in tix.groupby("sid"):
+        by_sid[str(sid)] = np.sort(g["failed_ts"].to_numpy(dtype=np.float64))
+    return tix, by_sid
 
 
 def scan_mcelog_rowcol_max(
@@ -179,6 +221,7 @@ def build_events_by_sid(
     finalize_workers: int = 1,
     spatial_heatmap: bool = False,
     mcelog_error_type_filter: list[int] | None = None,
+    time_epoch_offset: float = 0.0,
 ) -> tuple[dict[str, dict[str, np.ndarray]], bool]:
     """分块读取 mcelog，按 sid 聚合后按时间排序。
 
@@ -210,7 +253,7 @@ def build_events_by_sid(
                 break
             if len(chunk) > room:
                 chunk = chunk.iloc[:room]
-        tsec = _series_to_unix_seconds(chunk["error_time"])
+        tsec = to_relative_seconds_array(series_to_absolute_seconds(chunk["error_time"]), time_epoch_offset)
         rows = chunk["row"].to_numpy(dtype=np.int32, copy=False)
         cols = chunk["col"].to_numpy(dtype=np.int32, copy=False)
         et = chunk["error_type"].to_numpy(dtype=np.int8, copy=False)
@@ -234,7 +277,7 @@ def build_events_by_sid(
     out: dict[str, dict[str, np.ndarray]] = {}
     events_finalize_parallel = False
     n_sid = len(buckets)
-    min_sid_mp = max(64, finalize_workers * 4)
+    min_sid_mp = max(32, finalize_workers)
     use_finalize_mp = (
         _preprocess_fork_parallel_available()
         and finalize_workers > 1
@@ -293,10 +336,15 @@ def build_events_by_sid(
     return out, events_finalize_parallel
 
 
-def load_index_table(path: Path, max_rows: int | None) -> pd.DataFrame:
-    """读索引 CSV，解析 `predict_time` 并写入 `predict_ts`（Unix 秒）。
+def load_index_table(
+    path: Path,
+    max_rows: int | None,
+    time_epoch_offset: float | None = None,
+) -> pd.DataFrame:
+    """读索引 CSV，解析 ``predict_time`` 并写入 ``predict_ts``（**相对秒**，全局最早时刻 = 0）。
 
-    低年份时间写入文件时建议 ISO 8601（四位年），避免非 ISO 字符串被误解析；见 `docs/troubleshooting.md`。
+    本仓库 ``build_index`` 产物以 1970-01-01 起算的 ISO 字符串存储，解析后即为相对秒。
+    遗留「公元 0001」等低年份索引须传入 ``time_epoch_offset``（与 preprocess 扫描的 ``t₀`` 一致）。
     """
     if not path.is_file():
         raise FileNotFoundError(
@@ -307,13 +355,23 @@ def load_index_table(path: Path, max_rows: int | None) -> pd.DataFrame:
         if col not in df.columns:
             raise ValueError(f"索引表必须包含列 `{col}`，当前: {list(df.columns)}")
     df["sid"] = df["sid"].astype(str)
-    if max_rows is not None and int(max_rows) > 0 and len(df) > int(max_rows):
-        df = df.iloc[: int(max_rows)].copy()
     pts = pd.to_datetime(df["predict_time"], errors="coerce", format="mixed")
     if pts.isna().any():
         bad = int(pts.isna().sum())
         raise ValueError(f"predict_time 存在 {bad} 行无法解析为时间")
-    df["predict_ts"] = _series_to_unix_seconds(df["predict_time"])
+    rel_ts = resolve_index_predict_ts(
+        df["predict_time"],
+        time_epoch_offset=time_epoch_offset,
+        index_path=path,
+    )
+    df["predict_ts"] = rel_ts
+    if max_rows is not None and int(max_rows) > 0 and len(df) > int(max_rows):
+        df = (
+            df.sort_values("predict_ts", kind="mergesort")
+            .iloc[: int(max_rows)]
+            .reset_index(drop=True)
+        )
+    df["predict_time"] = [relative_seconds_to_predict_time_str(float(t)) for t in df["predict_ts"]]
     return df
 
 
@@ -321,40 +379,26 @@ def merge_ticket_labels(
     index_df: pd.DataFrame,
     tickets_path: Path,
     failure_types: list[int],
-    backtrace_sec: float,
+    label_horizon_seconds: float,
+    time_epoch_offset: float = 0.0,
+    *,
+    by_sid_fail: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """按天池规则打标：存在工单满足 predict_ts <= failed_ts <= predict_ts + backtrace。
+    """按工单规则打标：存在工单满足 predict_ts <= failed_ts <= predict_ts + label_horizon_seconds。
 
-    对每个 sid 将 failed_ts 排序后，对每个索引行用 searchsorted 在 O(log K) 判断 [lo,hi] 内是否有失败时刻；
-    若线性扫 tickets 会慢，故先 groupby sid 建有序数组。
+    ``index_df.predict_ts`` 与工单 ``failed_ts`` 均为**相对秒**（须与 mcelog 事件时间同一 ``time_epoch_offset``）。
+    传入 ``by_sid_fail`` 时可跳过重复读 tickets CSV（索引构建阶段复用）。
     """
-    tix = pd.read_csv(tickets_path, low_memory=False)
-    for col in ("sid", "failure_type", "failed_time"):
-        if col not in tix.columns:
-            raise ValueError(f"tickets 需含 `{col}`，当前: {list(tix.columns)}")
-    tix["sid"] = tix["sid"].astype(str)
-    ft_set = set(int(x) for x in failure_types)
-    tix = tix[tix["failure_type"].isin(ft_set)].copy()
-    tix["failed_ts"] = _series_to_unix_seconds(tix["failed_time"])
-    tix = tix.dropna(subset=["failed_ts"])
-
-    by_sid: dict[str, np.ndarray] = {}
-    for sid, g in tix.groupby("sid"):
-        by_sid[str(sid)] = np.sort(g["failed_ts"].to_numpy(dtype=np.float64))
+    if by_sid_fail is None:
+        _, by_sid_fail = load_ticket_failures(tickets_path, failure_types, time_epoch_offset)
 
     y = np.zeros(len(index_df), dtype=np.int64)
-    bt = float(backtrace_sec)
+    bt = float(label_horizon_seconds)
     sids = index_df["sid"].astype(str).to_numpy()
     pts_arr = index_df["predict_ts"].to_numpy(dtype=np.float64)
     for i in range(len(index_df)):
         sid = str(sids[i])
-        pts = float(pts_arr[i])
-        fail_times = by_sid.get(sid)
-        if fail_times is None or fail_times.size == 0:
-            continue
-        lo, hi = pts, pts + bt
-        j = int(np.searchsorted(fail_times, lo, side="left"))
-        if j < len(fail_times) and fail_times[j] <= hi:
+        if failure_in_horizon(float(pts_arr[i]), by_sid_fail.get(sid), bt):
             y[i] = 1
     return y
 
@@ -468,7 +512,7 @@ def materialize_dataset(
     processed_dir.mkdir(parents=True, exist_ok=True)
 
     mcelog_path = Path(data_cfg["mcelog_path"])
-    chunk = int(data_cfg.get("mcelog_chunk_rows", 500_000))
+    chunk = int(data_cfg.get("mcelog_chunk_rows", 1_000_000))
     win = float(data_cfg.get("window_seconds", 300))
     max_rows = data_cfg.get("max_index_rows")
     mcelog_cap = data_cfg.get("mcelog_max_rows")
@@ -530,14 +574,52 @@ def materialize_dataset(
 
     print(f"Grid representation={rep!r}, (H,W)=({grid_h},{grid_w}), channels={in_ch}", flush=True)
 
+    index_path = Path(data_cfg["index_features_path"])
+    print("Computing global time epoch offset (earliest raw timestamp → relative t=0) …", flush=True)
+    time_epoch_offset = compute_global_time_epoch_offset(
+        mcelog_path,
+        Path(data_cfg["tickets_path"]),
+        index_path=index_path,
+        mcelog_chunk_rows=chunk,
+        mcelog_max_rows=mcelog_cap,
+    )
+    print(f"  time_epoch_offset_absolute={time_epoch_offset:.3f}", flush=True)
+
+    stats_path = index_path.parent / (index_path.name + ".stats.json")
+    if stats_path.is_file():
+        try:
+            idx_stats = json.loads(stats_path.read_text(encoding="utf-8"))
+            idx_off = idx_stats.get("time_epoch_offset_absolute")
+            idx_scan = idx_stats.get("mcelog_scan_rows")
+            if idx_scan is None:
+                cfg_block = idx_stats.get("config") or {}
+                idx_scan = cfg_block.get("mcelog_scan_rows")
+            if mcelog_cap is not None and idx_scan is not None:
+                if int(idx_scan) != int(mcelog_cap):
+                    raise ValueError(
+                        f"索引 sidecar mcelog_scan_rows={idx_scan} 与当前 preprocess mcelog_max_rows={mcelog_cap} "
+                        "不一致；请用相同截断行数重建索引（bash scripts/build_index.sh smoke）并清空 processed/splits。"
+                    )
+            if idx_off is not None and abs(float(idx_off) - time_epoch_offset) > 1.0:
+                raise ValueError(
+                    f"索引 sidecar time_epoch_offset_absolute={float(idx_off):.3f} "
+                    f"与 preprocess 扫描值 {time_epoch_offset:.3f} 不一致；"
+                    "请重建索引（bash scripts/build_index.sh smoke）并清空 data/processed、data/splits。"
+                )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            if isinstance(exc, ValueError):
+                raise
+            pass
+
     print("Loading index CSV …", flush=True)
-    idx_df = load_index_table(Path(data_cfg["index_features_path"]), max_rows)
-    bt_used = float(data_cfg.get("label_backtrace_seconds", 86400))
+    idx_df = load_index_table(index_path, max_rows, time_epoch_offset=time_epoch_offset)
+    bt_used = label_horizon_seconds_from_dict(data_cfg)
     y = merge_ticket_labels(
         idx_df,
         Path(data_cfg["tickets_path"]),
         list(data_cfg.get("label_failure_types", [1, 2, 3])),
         bt_used,
+        time_epoch_offset=time_epoch_offset,
     )
 
     inv_path = data_cfg.get("inventory_path")
@@ -562,6 +644,7 @@ def materialize_dataset(
         finalize_workers=nw_cfg,
         spatial_heatmap=spatial,
         mcelog_error_type_filter=ft_filter,
+        time_epoch_offset=time_epoch_offset,
     )
 
     # 按索引行填 X：样本数 n = 索引表行数（与 mcelog 行数无关）
@@ -570,7 +653,7 @@ def materialize_dataset(
     sids_arr = idx_df["sid"].astype(str).to_numpy()
     pts_arr = idx_df["predict_ts"].to_numpy(dtype=np.float64)
     # 填网格并行：样本太少时进程开销不划算；非 Linux 关闭
-    min_samples_mp = max(32, nw_cfg * 4)
+    min_samples_mp = max(16, nw_cfg * 2)
     use_mp = _preprocess_fork_parallel_available() and nw_cfg > 1 and n >= min_samples_mp
     if use_mp:
         try:
@@ -579,6 +662,7 @@ def materialize_dataset(
             use_mp = False
 
     grid_fill_parallel_done = False
+    n_empty_grids = 0
     global _WORKER_CTX
     leg_in = int(model_cfg.get("in_channels", 3))
 
@@ -612,8 +696,9 @@ def materialize_dataset(
         try:
             ctx_mp = multiprocessing.get_context("fork")
             with ctx_mp.Pool(processes=len(batches)) as pool:
-                for inds, block in pool.map(_fill_indices_batch, batches):
+                for inds, block, skip in pool.map(_fill_indices_batch, batches):
                     X[inds] = block
+                    n_empty_grids += int(skip)
         finally:
             _WORKER_CTX = None
         grid_fill_parallel_done = True
@@ -639,6 +724,7 @@ def materialize_dataset(
                 pts = float(pts_arr[i])
                 sl = window_slice(events, sid, pts, win)
                 if sl is None:
+                    n_empty_grids += 1
                     continue
                 if spatial:
                     r, c, _e, _t, bk = sl
@@ -653,13 +739,19 @@ def materialize_dataset(
                     r, c, e, _t, _bk = sl
                     X[i] = fill_log1p_grid(r, c, e, grid_h, grid_w, leg_in)
 
+    if n_empty_grids > 0:
+        print(
+            f"警告：{n_empty_grids}/{n} 条样本在 mcelog 窗口内无事件（sid 缺失或窗口为空），对应 X 行为全零。",
+            flush=True,
+        )
+
     meta = idx_df[["sid", "predict_time"]].copy()
     meta["label"] = y.astype(np.int64)
     meta["predict_ts"] = idx_df["predict_ts"].astype(np.float64)
 
     np.save(processed_dir / "X.npy", X)
     np.save(processed_dir / "y.npy", y)
-    # spatial 且 inventory 已进 X 通道时不再写 tabular.npy，并删除陈旧文件以免 validate 误判
+    # spatial 且 inventory 已进 X 通道时不写 tabular.npy，并删除 splits 中多余的 tabular 文件以免 validate 误判
     save_tab = not spatial or not inv_as_grid
     tab_dim_manifest = int(tab.shape[1]) if tab.ndim == 2 else 0
     if save_tab:
@@ -674,15 +766,16 @@ def materialize_dataset(
 
     # manifest：供 validate / train 校验 grid_shape、并行阶段是否启用等
     manifest: dict[str, Any] = {
-        "schema": "tianchi_spatial_heatmap" if spatial else "tianchi_5m_grid",
+        "schema": "tianchi_spatial_heatmap" if spatial else "legacy_rc_et",
         "grid_representation": rep,
         "n_samples": int(n),
         "grid_shape": [int(in_ch), int(grid_h), int(grid_w)],
         "tabular_dim": tab_dim_manifest,
         "tabular_feature_names": list(TABULAR_FEATURE_NAMES),
         "window_seconds": win,
+        "label_horizon_seconds": bt_used,
         "label_backtrace_seconds": bt_used,
-        "label_failure_types": list(data_cfg.get("label_failure_types", [])),
+        "label_failure_types": list(data_cfg.get("label_failure_types", [1, 2, 3])),
         "pos_rate": float(y.mean()) if n else 0.0,
         "inventory_path": str(inv_path) if inv_path else None,
         "inventory_as_grid_channels": bool(spatial and inv_as_grid),
@@ -691,6 +784,11 @@ def materialize_dataset(
         "preprocess_parallel_frac": effective_preprocess_parallel_frac_recorded(data_cfg),
         "preprocess_events_finalize_parallel": bool(events_finalize_parallel),
         "preprocess_grid_fill_parallel": grid_fill_parallel_done,
+        "n_empty_grids": int(n_empty_grids),
+        "index_features_path": str(Path(data_cfg["index_features_path"]).resolve()),
+        "time_axis": "relative_seconds_since_global_min",
+        "time_epoch_offset_absolute": float(time_epoch_offset),
+        "mcelog_max_rows": int(mcelog_cap) if mcelog_cap is not None else None,
     }
     if spatial:
         manifest["row_bin_size"] = int(row_bs)

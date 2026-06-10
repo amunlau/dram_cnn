@@ -1,0 +1,33 @@
+# 30 分钟预测窗 + 10 分钟采样步长
+# 前置：bash scripts/build_horizon_indexes.sh smoke（生成下方 stub 索引）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_horizon_30m
+  data:
+    window_seconds: 1800
+    label_horizon_seconds: 1800
+    label_backtrace_seconds: 1800
+    # 冒烟：与 exp_baseline 相同截断；全量请去掉 max_* 并换 full 索引
+    max_index_rows: 500
+    mcelog_max_rows: 800000
+    index_features_path: data/index_stubs/features_index_h1800s_step600s_smoke.csv
+    # 全量对比：bash scripts/build_horizon_indexes.sh full 后改为 data/raw/features_index_h1800s_step600s_full.csv
+  train:
+    epochs: 20
+    patience: 6
+    # 冒烟对比实验：关闭 DDP/auto_batch 加速；全量生产可删此段以继承 base.yaml 默认
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false
+  infer:
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false

@@ -80,9 +80,7 @@ def test_build_positive_oversample_no_positives():
 def test_index_mapped_dataset_matches_base_rows():
     x = torch.randn(3, 2, 2, 2)
     y = torch.tensor([0, 1, 0], dtype=torch.long)
-    base = type("B", (), {})()
-    base.x, base.y = x, y
-    ds = IndexMappedDataset(base.x, base.y, np.array([2, 1, 1], dtype=np.int64))
+    ds = IndexMappedDataset((x, y, None), np.array([2, 1, 1], dtype=np.int64))
     assert len(ds) == 3
     x0, y0 = ds[0]
     assert torch.equal(x0, x[2]) and int(y0) == 0

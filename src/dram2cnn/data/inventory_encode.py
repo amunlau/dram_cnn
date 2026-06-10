@@ -6,9 +6,12 @@ from __future__ import annotations
 未知取值在该组内全 0；同一行至多每组一个为 1。"""
 
 from pathlib import Path
+import logging
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # 与竞赛侧 `one_hot_encoding_features` 类别一致；未知取值在该组全 0。
 DRAM_MODEL_ORDER = ("A1", "A2", "B1", "B2", "B3", "C1", "C2")
@@ -53,6 +56,14 @@ def load_inventory_by_sid(path: Path | str) -> dict[str, np.ndarray]:
         if col not in df.columns:
             raise ValueError(f"inventory 需含列 `{col}`，当前: {list(df.columns)}")
     df["sid"] = df["sid"].astype(str)
+    dup_mask = df["sid"].duplicated(keep="last")
+    if dup_mask.any():
+        dup_sids = df.loc[dup_mask, "sid"].unique().tolist()
+        logger.warning(
+            "inventory.csv 存在重复 sid（%d 行将被后者覆盖）: %s",
+            int(dup_mask.sum()),
+            dup_sids[:8],
+        )
     out: dict[str, np.ndarray] = {}
     # 按列名属性访问，避免 CSV 列顺序与 itertuples 位置不一致；比 iterrows 快约一个数量级。
     for t in df.itertuples(index=False):
