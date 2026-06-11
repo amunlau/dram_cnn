@@ -5,6 +5,7 @@ from __future__ import annotations
 约定见 `docs/tianchi_pipeline.md`。 **`spatial_heatmap`** 下 H×W 由分箱与 `model.grid_*` 决定；**`legacy_rc_et`** 下由 `grid_max_*` 与 `model.grid_*` 取 min。"""
 
 import argparse
+import gc
 import sys
 from pathlib import Path
 
@@ -38,7 +39,8 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
         Path(cfg["data"]["processed_dir"]),
         seed=int(cfg["base"].get("seed", 42)),
     )
-    # 阶段二：splitter 读 processed，写出 X_train 等并 normalize_split_features_by_train
+    gc.collect()
+    # 阶段二：splitter 读 processed（memmap），写出 X_train 等并 normalize
     split_strategy = cfg["data"].get("split_strategy", "time_stratified")
     norm_method = cfg["data"].get("normalization_method", "robust")
     norm_clip = cfg["data"].get("normalization_clip", 20.0)

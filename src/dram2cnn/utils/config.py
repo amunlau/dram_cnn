@@ -76,7 +76,8 @@ def _normalize_io_paths(obj: Any, project_root: Path) -> Any:
                 out[k] = _normalize_io_paths(v, project_root)
             elif isinstance(v, str) and (k.endswith("_path") or k.endswith("_dir")):
                 vp = Path(v)
-                out[k] = str(vp if vp.is_absolute() else (project_root / vp).resolve())
+                out[k] = str(vp if vp.is_absolute() else (
+                    project_root / vp).resolve())
             else:
                 out[k] = v
         return out
@@ -95,13 +96,15 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     for k in ("mcelog_path", "tickets_path", "index_features_path"):
         p = Path(data_cfg.get(k, ""))
         if not p.is_file():
-            raise FileNotFoundError(f"Config error: `{k}` is not a readable file: {p}")
+            raise FileNotFoundError(
+                f"Config error: `{k}` is not a readable file: {p}")
 
     inv = data_cfg.get("inventory_path")
     if inv:
         ip = Path(inv)
         if not ip.is_file():
-            raise FileNotFoundError(f"Config error: `inventory_path` is not a readable file: {ip}")
+            raise FileNotFoundError(
+                f"Config error: `inventory_path` is not a readable file: {ip}")
 
     if int(data_cfg.get("window_seconds", 0)) <= 0:
         raise ValueError("data.window_seconds must be > 0")
@@ -109,34 +112,41 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     # label_horizon_seconds 为首选字段；label_backtrace_seconds 为同义别名
     horizon = sync_label_horizon_aliases(data_cfg)
     if horizon <= 0:
-        raise ValueError("data.label_horizon_seconds (或 label_backtrace_seconds) must be > 0")
+        raise ValueError(
+            "data.label_horizon_seconds (或 label_backtrace_seconds) must be > 0")
 
     split_strategy = data_cfg.get("split_strategy", "time_stratified")
     if split_strategy not in {"time", "time_stratified", "sid"}:
         raise ValueError(
             "Config error: `split_strategy` must be one of: time, time_stratified, sid"
         )
-    norm_method = str(data_cfg.get("normalization_method", "robust")).lower().strip()
+    norm_method = str(data_cfg.get(
+        "normalization_method", "robust")).lower().strip()
     if norm_method not in {"zscore", "robust"}:
-        raise ValueError("Config error: data.normalization_method must be zscore or robust")
+        raise ValueError(
+            "Config error: data.normalization_method must be zscore or robust")
     clip_raw = data_cfg.get("normalization_clip", 20.0)
     if clip_raw not in (None, "null", False):
         if float(clip_raw) <= 0:
-            raise ValueError("Config error: data.normalization_clip must be > 0 or null")
+            raise ValueError(
+                "Config error: data.normalization_clip must be > 0 or null")
     if split_strategy in {"time", "time_stratified"}:
         ts = data_cfg.get("time_split") or {}
         tr = float(ts.get("train_ratio", 0.7))
         vr = float(ts.get("val_ratio", 0.15))
         te = float(ts.get("test_ratio", 0.15))
         if round(tr + vr + te, 5) != 1.0:
-            raise ValueError("Config error: data.time_split train/val/test ratios must sum to 1.0")
+            raise ValueError(
+                "Config error: data.time_split train/val/test ratios must sum to 1.0")
         min_pos = int(ts.get("min_pos_per_split", 1))
         if min_pos < 0:
-            raise ValueError("Config error: data.time_split.min_pos_per_split must be >= 0")
+            raise ValueError(
+                "Config error: data.time_split.min_pos_per_split must be >= 0")
 
     infer_mode = cfg.get("infer", {}).get("mode", "full")
     if infer_mode != "full":
-        raise ValueError("Config error: `infer.mode` must be `full` for grid_cnn")
+        raise ValueError(
+            "Config error: `infer.mode` must be `full` for grid_cnn")
 
     m_tab = int(cfg.get("model", {}).get("tabular_dim", 0))
     if m_tab > 0 and m_tab != TABULAR_DIM:
@@ -145,7 +155,8 @@ def validate_config(cfg: Dict[str, Any]) -> None:
         )
 
     model_cfg = cfg.get("model", {})
-    rep = str(data_cfg.get("grid_representation", "spatial_heatmap")).lower().strip()
+    rep = str(data_cfg.get("grid_representation",
+              "spatial_heatmap")).lower().strip()
     if rep == "spatial_heatmap":
         inv_as_grid = bool(data_cfg.get("inventory_as_grid_channels", True))
         n_banks = int(data_cfg.get("num_bank_channels", 16))
@@ -176,14 +187,24 @@ def validate_config(cfg: Dict[str, Any]) -> None:
         )
     imb_cfg = train_cfg.get("imbalance") or {}
     if imb_cfg:
-        scheme = str(imb_cfg.get("weight_scheme", "inverse_freq")).lower().strip()
+        scheme = str(imb_cfg.get("weight_scheme",
+                     "inverse_freq")).lower().strip()
         if scheme not in {"inverse_freq", "sqrt"}:
             raise ValueError(
                 "Config error: train.imbalance.weight_scheme must be 'inverse_freq' or 'sqrt'"
             )
         cap = imb_cfg.get("positive_weight_cap")
         if cap is not None and float(cap) <= 0:
-            raise ValueError("Config error: train.imbalance.positive_weight_cap must be > 0 or null")
+            raise ValueError(
+                "Config error: train.imbalance.positive_weight_cap must be > 0 or null")
+
+    data_cfg = cfg.get("data", {})
+    ram_frac = data_cfg.get("ram_budget_frac")
+    if ram_frac is not None and not (0.0 < float(ram_frac) <= 1.0):
+        raise ValueError("Config error: data.ram_budget_frac must be in (0, 1]")
+    ram_total = data_cfg.get("ram_total_gib")
+    if ram_total is not None and float(ram_total) <= 0:
+        raise ValueError("Config error: data.ram_total_gib must be > 0 or null")
 
     _validate_merged_gpu_ddp(cfg, "train")
     _validate_merged_gpu_ddp(cfg, "infer")
@@ -193,7 +214,8 @@ def _validate_ddp_enabled_value(raw: Any, label: str) -> None:
     if isinstance(raw, bool):
         return
     if str(raw).strip().lower() not in {"true", "false", "auto", "1", "0", "yes", "no"}:
-        raise ValueError(f"Config error: {label}.ddp.enabled must be true, false, or auto")
+        raise ValueError(
+            f"Config error: {label}.ddp.enabled must be true, false, or auto")
 
 
 def _validate_gpu_section(gpu_cfg: dict, label: str) -> None:
@@ -201,13 +223,16 @@ def _validate_gpu_section(gpu_cfg: dict, label: str) -> None:
         return
     frac = gpu_cfg.get("vram_budget_frac")
     if frac is not None and not (0.0 < float(frac) <= 1.0):
-        raise ValueError(f"Config error: {label}.gpu.vram_budget_frac must be in (0, 1]")
+        raise ValueError(
+            f"Config error: {label}.gpu.vram_budget_frac must be in (0, 1]")
     bmin = gpu_cfg.get("batch_size_min")
     bmax = gpu_cfg.get("batch_size_max")
     if bmin is not None and int(bmin) < 1:
-        raise ValueError(f"Config error: {label}.gpu.batch_size_min must be >= 1")
+        raise ValueError(
+            f"Config error: {label}.gpu.batch_size_min must be >= 1")
     if bmin is not None and bmax is not None and int(bmin) > int(bmax):
-        raise ValueError(f"Config error: {label}.gpu.batch_size_min must be <= batch_size_max")
+        raise ValueError(
+            f"Config error: {label}.gpu.batch_size_min must be <= batch_size_max")
 
 
 def _validate_merged_gpu_ddp(cfg: Dict[str, Any], scope: str) -> None:
@@ -216,7 +241,8 @@ def _validate_merged_gpu_ddp(cfg: Dict[str, Any], scope: str) -> None:
     gpu_cfg = merged_scope_section(cfg, "gpu", scope)
     ddp_cfg = merged_scope_section(cfg, "ddp", scope)
     _validate_gpu_section(gpu_cfg, f"merged {scope}")
-    _validate_ddp_enabled_value(ddp_cfg.get("enabled", "auto"), f"merged {scope}")
+    _validate_ddp_enabled_value(ddp_cfg.get(
+        "enabled", "auto"), f"merged {scope}")
 
 
 def deep_update(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -237,7 +263,8 @@ def load_experiment_config(exp_path: str | Path) -> Dict[str, Any]:
     """
     exp_file = Path(exp_path).resolve()
     exp = load_yaml(exp_file)
-    missing = [k for k in ("base", "data", "model", "train", "infer") if k not in exp]
+    missing = [k for k in ("base", "data", "model",
+                           "train", "infer") if k not in exp]
     if missing:
         raise ValueError(f"实验 YAML {exp_file} 缺少必需键: {', '.join(missing)}")
     exp_parent = exp_file.parent

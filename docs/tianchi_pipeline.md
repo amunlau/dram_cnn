@@ -28,15 +28,16 @@
 | `window_seconds` | 特征窗 W（秒）；半开窗 `[predict_ts−W, predict_ts)`；默认 **300** |
 | `label_horizon_seconds` | 预测 horizon H（秒）；闭区间标签窗 `[predict_ts, predict_ts+H]` |
 | `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（别名；配置加载时双向同步） |
-| `split_strategy` / `time_split` | 切分策略（默认 **`time_stratified`**）与 `min_pos_per_split` |
+| `split_strategy` / `time_split` | 切分策略（默认 **`time_stratified`**）；比例默认 **0.7 / 0.15 / 0.15**（`exp_baseline` 覆盖为 0.6 / 0.2 / 0.2）；`min_pos_per_split` 默认 1 |
 | `normalization_clip` | 归一化后 clip 到 ±值（默认 20；null 不裁剪） |
 | `index_build` / `index_build_presets` | `scripts/build_index.py` 采样与平衡参数 |
 | `label_failure_types` | 工单类型列表，如 `[1,2,3]` |
 | `grid_max_row/col` | **legacy** 模式下 row/col 裁剪上限；spatial 下可忽略 |
 | `inventory_path` | `inventory.csv`；`null` 时 one-hot 全 0 |
 | `max_index_rows` / `mcelog_max_rows` | 调试用子样本 |
-| `preprocess_workers` | **mcelog 按 sid 排序**与**填网格 X** 共用：`null` = `max(1, floor(os.cpu_count() × preprocess_parallel_frac))`；`1` = 全关闭并行 |
-| `preprocess_parallel_frac` | 与上一项联用；**默认 0.6**（约使用 **60%** 逻辑 CPU 推算进程数，为系统留余量）；基线/全量可在实验 `overrides.data` 覆盖 |
+| `preprocess_workers` | **mcelog 按 sid 排序**与**填网格 X** 共用：显式整数固定 CPU 上限；`null` = `max(1, floor(os.cpu_count() × preprocess_parallel_frac))`；`1` = 全关闭并行 |
+| `preprocess_parallel_frac` | 与上一项联用；**默认 0.6**（约 **60%** 逻辑 CPU）；可被 **`ram_budget_frac`** 进一步压低 |
+| `ram_total_gib` / `ram_budget_frac` | 系统内存（非显存）；默认 **50%** MemTotal 为 preprocess 峰值预算 |
 
 **预处理耗时**：全量时主要时间在 **顺序读取 entire `mcelog.csv`** 写入按 sid 的 bucket，以及 **对每个 sid 的事件按时间排序合并**、再 **逐索引行填网格**。在 **Linux** 上，后两步均可 **多进程**（同一 `preprocess_workers` / `preprocess_parallel_frac`，`fork` + 写时复制）：① bucket 较多时对「按 sid 排序」并行（见 manifest `preprocess_events_finalize_parallel`）；② 索引行数较多时对「填 X」并行（`preprocess_grid_fill_parallel`）。非 Linux，或 sid 数 / 样本数低于阈值时自动退回单进程。详见 `preprocess_manifest.json`。
 

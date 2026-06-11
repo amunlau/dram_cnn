@@ -85,7 +85,7 @@ bash scripts/build_index.sh smoke
 ```bash
 bash scripts/build_index.sh full
 # 输出：data/raw/features_index_h300s_step300s_full.csv
-# 之后须在 data.yaml 或实验 overrides 中修改 index_features_path
+# exp_full_best_ddp.yaml 已默认指向该路径；baseline 仍用演示 stub
 ```
 
 自定义 horizon / 采样步长示例：
@@ -110,7 +110,7 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 | 实验 YAML | 用途 |
 |-----------|------|
 | `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**time_split 0.6/0.2/0.2**；**model_smoke.yaml**；**overrides 关闭 DDP/auto_batch** |
-| `exp_full_best_ddp.yaml` | **全量 + 多卡**：取消行数截断、`num_workers=8`；**time_split 继承 data.yaml 0.7/0.15/0.15**；**gpu/ddp 继承 base 默认** |
+| `exp_full_best_ddp.yaml` | **全量 + 多卡**：取消行数截断、`num_workers=2`；**time_split 继承 data.yaml 0.7/0.15/0.15**；**gpu/ddp 继承 base 默认** |
 | `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（配合 `scripts/verify_ddp.sh`） |
 | `exp_horizon_30m.yaml` | 30 分钟预测窗；**冒烟 overrides 关闭 DDP/auto_batch**（同 baseline） |
 | `exp_horizon_1h.yaml` | 1 小时预测窗；**冒烟 overrides 关闭 DDP/auto_batch** |
@@ -235,7 +235,7 @@ bash scripts/build_index.sh full
 # 3. 清空旧预处理产物（重要）
 rm -rf data/processed/* data/splits/*
 
-# 4. 预处理（高并行：preprocess_parallel_frac=0.85）
+# 4. 预处理（系统 RAM 峰值 ≤50%，见 preprocess 日志）
 bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
 
 # 5. 校验
@@ -326,7 +326,7 @@ bash scripts/optuna.sh \
 | `evaluate.sh [exp]` | 指标与图表 | `exp_baseline.yaml` |
 | `optuna.sh [exp] [hpo]` | 超参搜索 | `exp_optuna_smoke.yaml` |
 | `autotune.sh` | 一键冒烟全流程 | 见 `src/dram2cnn/pipelines/run_autotune.py` 的 `EXPS` |
-| `clean.sh [--notebooks]` | 清理 runs、processed/splits、outputs 生成物、缓存 | — |
+| `clean.sh [--notebooks] [--purge-indexes]` | 清理 runs、processed/splits、outputs、缓存；`--notebooks` 清 Notebook 输出；`--purge-indexes` 才删 raw 全量索引 | — |
 | `verify_ddp.sh` | 多卡 DDP 回归（train/infer/optuna） | `exp_ddp_verify.yaml` |
 | `inspect_data.sh` | 查看 processed 概览 | — |
 
@@ -403,8 +403,8 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_best_d
 
 | 阶段 | 建议 |
 |------|------|
-| 预处理 | `exp_full_best_ddp` 中 `preprocess_parallel_frac: 0.85`；共享集群可降至 `0.3` |
-| 训练 DataLoader | 全量实验 `num_workers: 8`, `prefetch_factor: 4` |
+| 预处理 | 全局 `data.ram_budget_frac: 0.5`（系统内存 ≤50%）；全量 ~66k 行通常 worker=1 |
+| 训练 DataLoader | 全量实验 `num_workers: 2`, `prefetch_factor: 2` |
 | 多卡 | `CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh` |
 
 ---
@@ -444,7 +444,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 | 步骤 | 操作 |
 |------|------|
 | 1 | 运行 **build_index full** 单元（耗时长） |
-| 2 | **手动**在 `exp_full_best_ddp.yaml`（或 `data.yaml`）设置 `index_features_path: data/raw/features_index_h300s_step300s_full.csv` |
+| 2 | 确认 `exp_full_best_ddp.yaml` 的 `index_features_path` 指向已生成的 `data/raw/features_index_h300s_step300s_full.csv`（**仓库默认已配置**；自定义路径时再改 YAML） |
 | 3 | 清空 `data/processed/*`、`data/splits/*`；`clear_exp_markers("full_best")` 或删对应 marker |
 | 4 | 运行 **全量预检** 单元（仍指向 stub 会报错） |
 | 5 | 运行 **全量流水线** 单元（`train_ddp.sh`） |
@@ -485,7 +485,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 
 - `X_train` 与 `model.yaml` 形状不一致 → 重跑 preprocess
 - `pos_rate=0` 或 AUC 全 nan → 检查 `split_strategy`（默认 `time_stratified`）与索引正例数；全量训练时检查索引与工单打标
-- `exp_full_best_ddp` 样本数仍 ~500 → 未改 `index_features_path`
+- `exp_full_best_ddp` 样本数仍 ~500 → 未 `build_index.sh full`、未清空 `processed/`/`splits/` 重跑 preprocess，或误用 baseline 实验
 - `n_empty_grids > 0` → 部分样本 mcelog 窗为空；默认仅丢弃 **负样本** 空窗（见 `drop_empty_mcelog_windows`）
 - DDP `nproc > GPU 数` → 调整 `nproc_per_node` 或 `CUDA_VISIBLE_DEVICES`
 

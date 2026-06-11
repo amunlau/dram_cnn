@@ -56,9 +56,49 @@ def test_split_by_time_stratified_rejects_too_few_positives(tmp_path: Path) -> N
         split_by_time_stratified(str(proc), str(spl), 0.7, 0.15, 0.15, min_pos_per_split=1)
 
 
+def test_robust_normalization_channelwise_matches_batched(tmp_path: Path) -> None:
+    """分通道低内存归一化应与整表 float64 路径数值一致（小数组参考实现）。"""
+    rng = np.random.RandomState(42)
+    n, c, h, w = 48, 3, 4, 4
+    X = (rng.rand(n, c, h, w).astype(np.float32) + 0.5) * rng.randint(1, 5, (1, c, 1, 1))
+    n_train, n_val = 30, 9
+    train_idx = np.arange(n_train)
+    val_idx = np.arange(n_train, n_train + n_val)
+    test_idx = np.arange(n_train + n_val, n)
+    spl = tmp_path / "splits"
+    spl.mkdir()
+    np.save(spl / "X_train.npy", X[train_idx])
+    np.save(spl / "X_val.npy", X[val_idx])
+    np.save(spl / "X_test.npy", X[test_idx])
+
+    normalize_split_features_by_train(spl, method="robust", clip=20.0)
+    X_train_norm = np.load(spl / "X_train.npy")
+
+    ref_src = X[train_idx].astype(np.float64)
+    center = np.median(ref_src, axis=0, keepdims=True)
+    q75 = np.percentile(ref_src, 75, axis=0, keepdims=True)
+    q25 = np.percentile(ref_src, 25, axis=0, keepdims=True)
+    iqr = q75 - q25
+    mad = np.median(np.abs(ref_src - center), axis=0, keepdims=True)
+    std = ref_src.std(axis=0, keepdims=True) + 1e-6
+    scale = np.where(iqr > 1e-6, iqr, np.where(mad > 1e-6, mad, std)) + 1e-6
+    ref = np.clip(((ref_src - center) / scale).astype(np.float32), -20.0, 20.0)
+    np.testing.assert_allclose(X_train_norm, ref, rtol=1e-5, atol=1e-5)
+
+
 def test_robust_normalization_rejects_double_normalize(tmp_path: Path) -> None:
     proc = _write_processed(tmp_path, n=12, pos_indices=[2, 7, 9])
     spl = tmp_path / "splits"
     split_by_time_stratified(str(proc), str(spl), 0.5, 0.25, 0.25, min_pos_per_split=1)
     with pytest.raises(ValueError, match="已归一化"):
         normalize_split_features_by_train(spl, method="robust")
+
+
+def test_split_rerun_replaces_stale_normalization_stats(tmp_path: Path) -> None:
+    """重跑 split 阶段时不应因旧 normalization_stats.json 失败（preprocess 可重复执行）。"""
+    proc = _write_processed(tmp_path, n=12, pos_indices=[2, 7, 9])
+    spl = tmp_path / "splits"
+    split_by_time_stratified(str(proc), str(spl), 0.5, 0.25, 0.25, min_pos_per_split=1)
+    split_by_time_stratified(str(proc), str(spl), 0.5, 0.25, 0.25, min_pos_per_split=1)
+    stats = json.loads((spl / "normalization_stats.json").read_text(encoding="utf-8"))
+    assert stats.get("normalized") is True

@@ -106,6 +106,24 @@ def test_validate_config_rejects_bad_time_split_ratios():
         validate_config(cfg)
 
 
+def test_validate_config_rejects_bad_ram_budget_frac():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": __file__,
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+            "ram_budget_frac": 1.5,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "train": {},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(ValueError, match="ram_budget_frac"):
+        validate_config(cfg)
+
+
 def test_validate_config_rejects_bad_merged_vram_frac():
     cfg = {
         "base": {"gpu": {"vram_budget_frac": 1.5}},

@@ -35,11 +35,11 @@ Jupyter 工作流与命令行 **`scripts/*.sh`** 共用同一套配置（`config
 | 步骤 | Notebook 单元 | 说明 |
 |------|---------------|------|
 | 生成全量索引 | `full_best` → `build_index` | `bash scripts/build_index.sh full`（耗时长） |
-| 改 `index_features_path` | **手动编辑 YAML** | 指向 `data/raw/features_index_h300s_step300s_full.csv` |
+| 改 `index_features_path` | **已写入 YAML** | `exp_full_best_ddp.yaml` 默认指向全量 CSV；换索引时改路径并清空 processed |
 | 预检 | 全量预检单元 | 若仍指向 stub 则 **fail-fast** |
 | preprocess → evaluate | `full_best` 各步 | **`train_ddp.sh`** 多卡训练 |
 
-- 实验配置：**`exp_full_best_ddp.yaml`**（无行数截断、`preprocess_parallel_frac=0.85`；**gpu/ddp 继承 base 默认多卡**）。
+- 实验配置：**`exp_full_best_ddp.yaml`**（无行数截断；继承 **`ram_budget_frac=0.5`** 系统内存预算；**gpu/ddp 继承 base 默认多卡**）。
 - 产物：`runs/exp_tianchi_full_best_ddp/`。
 - **注意**：仅取消 `max_index_rows` **不会**自动切换全量索引，必须改 `index_features_path` 并清空 `data/processed`、`data/splits`。
 
@@ -80,7 +80,7 @@ export PYTHONPATH=src   # Notebook 首格通常会自动加入 src
 
 - **`docker compose up`** → JupyterLab **http://localhost:9999**（工作目录挂载仓库根）。
 - 修改 Python 源码后：**Kernel → Restart** 再跑，避免旧模块缓存。
-- 预处理并行度见 `configs/data.yaml` 的 `preprocess_parallel_frac`；manifest 中 `preprocess_events_finalize_parallel` / `preprocess_grid_fill_parallel` 标明是否启用。
+- 预处理并行度见 `configs/data.yaml` 的 `preprocess_workers` / `preprocess_parallel_frac` / `ram_budget_frac`；manifest 中 `preprocess_workers_requested`、`ram_budget_gib`、`preprocess_estimated_peak_gib`、`split_normalize_estimated_peak_gib`、`preprocess_ram_budget_exceeded` 等标明实际并行与内存预算。
 
 ## 输出目录
 

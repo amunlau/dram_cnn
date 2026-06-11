@@ -186,7 +186,7 @@ class IndexBuildConfig:
     mcelog_scan_rows: int | None = None
     mcelog_chunk_rows: int = 1_000_000
     min_positives: int = 5
-    min_total_rows: int = 10
+    min_total_rows: int = 50
     max_positive_candidates: int | None = None
     # 与 preprocess spatial 模式一致：bounds 扫描仅统计 CE 事件（默认 [1,2]）；legacy 模式用 error_type < 3
     mcelog_error_type_filter: list[int] | None = field(default_factory=lambda: [1, 2])
@@ -259,7 +259,7 @@ class IndexBuildConfig:
             ),
             mcelog_chunk_rows=int(raw.get("mcelog_chunk_rows", 1_000_000)),
             min_positives=int(raw.get("min_positives", 5)),
-            min_total_rows=int(raw.get("min_total_rows", 10)),
+            min_total_rows=int(raw.get("min_total_rows", 50)),
             max_positive_candidates=(
                 None
                 if raw.get("max_positive_candidates") in (None, "null")

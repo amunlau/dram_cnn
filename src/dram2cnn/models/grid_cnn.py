@@ -124,7 +124,7 @@ class GridCNN(nn.Module):
 
     def __init__(self, model_cfg: dict):
         super().__init__()
-        in_ch = int(model_cfg.get("in_channels", 3))
+        in_ch = int(model_cfg.get("in_channels", 31))
         num_classes = int(model_cfg.get("num_classes", 2))
         channels = list(model_cfg.get("backbone_channels", [64, 128, 256, 256]))
         blocks_per_stage = int(model_cfg.get("blocks_per_stage", 2))

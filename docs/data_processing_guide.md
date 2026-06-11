@@ -290,9 +290,9 @@ t_min + W ≤ predict_ts ≤ t_max − H
 
 在 **Linux** 上，(2)(3) 在满足 sid 数、样本数等阈值时可使用 **`fork` 多进程**（见 manifest 中 `preprocess_events_finalize_parallel`、`preprocess_grid_fill_parallel`）。**顺序读 CSV** 本身仍为单线程流式；非 Linux 环境为稳妥起见上述并行常关闭。
 
-并行进程数由 **`preprocess_workers`**（显式整数）或 **`null` + `preprocess_parallel_frac`**（按 `os.cpu_count()` 比例推算，**默认约 60%**；全量实验 **`exp_full_best_ddp` 覆盖为 0.85**）控制。各入口脚本会 `source scripts/lib/env_perf.sh`，设置 `OMP_NUM_THREADS=1` 等，避免 fork 与 BLAS 多线程叠加。
+并行进程数由 **`preprocess_workers`**（显式整数）或 **`null` + `preprocess_parallel_frac`**（按 `os.cpu_count()` 比例推算，**默认约 60%**）控制。全局 **`ram_budget_frac: 0.5`** 按样本数/网格/mcelog 自动 **`min(CPU, RAM)`** 限 worker（系统内存峰值 ≤50%，非显存）。各入口脚本会 `source scripts/lib/env_perf.sh`，设置 `OMP_NUM_THREADS=1` 等，避免 fork 与 BLAS 多线程叠加。
 
-**训练阶段**：`train.num_workers` / `prefetch_factor` 控制 DataLoader 预取（全量 DDP 默认 8 worker）；多卡见 `bash scripts/train_ddp.sh`。
+**训练阶段**：`train.num_workers` / `prefetch_factor` 控制 DataLoader 预取（全量 DDP 默认 **2** worker）；多卡见 `bash scripts/train_ddp.sh`。
 
 ---
 

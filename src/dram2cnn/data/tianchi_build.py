@@ -17,6 +17,7 @@ from __future__ import annotations
 
 产物：`X.npy`、`y.npy`、可选 `tabular.npy`、`meta.csv`、`preprocess_manifest.json`。"""
 
+import gc
 import json
 import multiprocessing
 import sys
@@ -45,6 +46,7 @@ from dram2cnn.utils.config import label_horizon_seconds_from_dict
 from dram2cnn.utils.preprocess_parallelism import (
     effective_preprocess_parallel_frac_recorded,
     preprocess_workers_log_line,
+    ram_budget_snapshot,
     resolve_preprocess_worker_count,
 )
 
@@ -68,7 +70,8 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, in
     """
     ctx = _WORKER_CTX
     if ctx is None:
-        raise RuntimeError("preprocess parallel worker: context not initialized")
+        raise RuntimeError(
+            "preprocess parallel worker: context not initialized")
     mode = str(ctx.get("mode", "legacy"))
     events = ctx["events"]
     win = float(ctx["win"])
@@ -167,7 +170,8 @@ def load_ticket_failures(
     ft_set = set(int(x) for x in failure_types)
     tix = tix[tix["failure_type"].isin(ft_set)].copy()
     tix["sid"] = tix["sid"].astype(str)
-    tix["failed_ts"] = series_to_absolute_seconds(tix["failed_time"]) - float(time_epoch_offset)
+    tix["failed_ts"] = series_to_absolute_seconds(
+        tix["failed_time"]) - float(time_epoch_offset)
     tix = tix.dropna(subset=["failed_ts"])
     by_sid: dict[str, np.ndarray] = {}
     for sid, g in tix.groupby("sid"):
@@ -193,7 +197,8 @@ def scan_mcelog_rowcol_max(
     cap = int(max_rows) if max_rows is not None and int(max_rows) > 0 else None
     for chunk in pd.read_csv(mcelog_path, chunksize=int(chunk_rows), usecols=usecols, low_memory=False):
         if spatial_heatmap:
-            ft = mcelog_error_type_filter if mcelog_error_type_filter is not None else [1, 2]
+            ft = mcelog_error_type_filter if mcelog_error_type_filter is not None else [
+                1, 2]
             chunk = chunk[chunk["error_type"].isin(ft)].copy()
         else:
             chunk = chunk[chunk["error_type"] < 3]
@@ -244,7 +249,8 @@ def build_events_by_sid(
         if cap is not None and seen >= cap:
             break
         if spatial_heatmap:
-            ft = mcelog_error_type_filter if mcelog_error_type_filter is not None else [1, 2]
+            ft = mcelog_error_type_filter if mcelog_error_type_filter is not None else [
+                1, 2]
             chunk = chunk[chunk["error_type"].isin(list(ft))].copy()
         else:
             chunk = chunk[chunk["error_type"] < 3].copy()
@@ -256,13 +262,15 @@ def build_events_by_sid(
                 break
             if len(chunk) > room:
                 chunk = chunk.iloc[:room]
-        tsec = to_relative_seconds_array(series_to_absolute_seconds(chunk["error_time"]), time_epoch_offset)
+        tsec = to_relative_seconds_array(series_to_absolute_seconds(
+            chunk["error_time"]), time_epoch_offset)
         rows = chunk["row"].to_numpy(dtype=np.int32, copy=False)
         cols = chunk["col"].to_numpy(dtype=np.int32, copy=False)
         et = chunk["error_type"].to_numpy(dtype=np.int8, copy=False)
         sids = chunk["sid"].astype(str).to_numpy(copy=False)
         if has_bank:
-            banks = np.clip(chunk["bankid"].to_numpy(dtype=np.int32, copy=False), 0, 15)
+            banks = np.clip(chunk["bankid"].to_numpy(
+                dtype=np.int32, copy=False), 0, 15)
         else:
             banks = np.zeros(len(chunk), dtype=np.int32)
         for i in range(len(chunk)):
@@ -298,7 +306,7 @@ def build_events_by_sid(
         chunk_sz = max(1, (len(keys) + k - 1) // k)
         batches: list[tuple[str, ...]] = []
         for i in range(0, len(keys), chunk_sz):
-            batches.append(tuple(keys[i : i + chunk_sz]))
+            batches.append(tuple(keys[i: i + chunk_sz]))
         print(
             f"Sorting mcelog buckets by time (fork Pool, {len(batches)} tasks, ~{finalize_workers} workers budget) …",
             flush=True,
@@ -370,7 +378,8 @@ def load_index_table(
     df["predict_ts"] = rel_ts
     if max_rows is not None and int(max_rows) > 0 and len(df) > int(max_rows):
         n_keep = int(max_rows)
-        df_sorted = df.sort_values("predict_ts", kind="mergesort").reset_index(drop=True)
+        df_sorted = df.sort_values(
+            "predict_ts", kind="mergesort").reset_index(drop=True)
         if len(df_sorted) > n_keep:
             warnings.warn(
                 f"索引表 {path.name} 共 {len(df_sorted)} 行，max_index_rows={n_keep} "
@@ -382,7 +391,8 @@ def load_index_table(
             df = df_sorted.iloc[pick].reset_index(drop=True)
         else:
             df = df_sorted
-    df["predict_time"] = [relative_seconds_to_predict_time_str(float(t)) for t in df["predict_ts"]]
+    df["predict_time"] = [relative_seconds_to_predict_time_str(
+        float(t)) for t in df["predict_ts"]]
     return df
 
 
@@ -401,7 +411,8 @@ def merge_ticket_labels(
     传入 ``by_sid_fail`` 时可跳过重复读 tickets CSV（索引构建阶段复用）。
     """
     if by_sid_fail is None:
-        _, by_sid_fail = load_ticket_failures(tickets_path, failure_types, time_epoch_offset)
+        _, by_sid_fail = load_ticket_failures(
+            tickets_path, failure_types, time_epoch_offset)
 
     y = np.zeros(len(index_df), dtype=np.int64)
     bt = float(label_horizon_seconds)
@@ -511,7 +522,8 @@ def concat_spatial_and_inventory_channels(spatial_banks: np.ndarray, inv_vec: np
     """`spatial_banks` [B,H,W] + inventory one-hot 逐通道平铺 [F,H,W] → [B+F,H,W]。"""
     _, h, w = spatial_banks.shape
     f = int(inv_vec.shape[0])
-    tiled = np.broadcast_to(inv_vec.reshape(f, 1, 1).astype(np.float32, copy=False), (f, h, w))
+    tiled = np.broadcast_to(inv_vec.reshape(
+        f, 1, 1).astype(np.float32, copy=False), (f, h, w))
     return np.concatenate([spatial_banks.astype(np.float32, copy=False), tiled], axis=0)
 
 
@@ -580,7 +592,8 @@ def materialize_dataset(
     max_rows = data_cfg.get("max_index_rows")
     mcelog_cap = data_cfg.get("mcelog_max_rows")
 
-    rep = str(data_cfg.get("grid_representation", "spatial_heatmap")).lower().strip()
+    rep = str(data_cfg.get("grid_representation",
+              "spatial_heatmap")).lower().strip()
     spatial = rep in {"spatial_heatmap", "heatmap", "spatial", "tianchi132973"}
 
     ft_filter_cfg = data_cfg.get("mcelog_error_type_filter")
@@ -635,7 +648,8 @@ def materialize_dataset(
         in_ch = int(model_cfg.get("in_channels", 3))
         row_bs, col_bs, n_banks = 1, 1, 0
 
-    print(f"Grid representation={rep!r}, (H,W)=({grid_h},{grid_w}), channels={in_ch}", flush=True)
+    print(
+        f"Grid representation={rep!r}, (H,W)=({grid_h},{grid_w}), channels={in_ch}", flush=True)
 
     index_path = Path(data_cfg["index_features_path"])
     print("Computing global time epoch offset (earliest raw timestamp → relative t=0) …", flush=True)
@@ -669,7 +683,8 @@ def materialize_dataset(
             raise
 
     print("Loading index CSV …", flush=True)
-    idx_df = load_index_table(index_path, max_rows, time_epoch_offset=time_epoch_offset)
+    idx_df = load_index_table(index_path, max_rows,
+                              time_epoch_offset=time_epoch_offset)
     bt_used = label_horizon_seconds_from_dict(data_cfg)
     y = merge_ticket_labels(
         idx_df,
@@ -687,8 +702,25 @@ def materialize_dataset(
     else:
         tab = np.zeros((len(idx_df), TABULAR_DIM), dtype=np.float32)
 
-    nw_cfg = resolve_preprocess_worker_count(data_cfg)
-    print(preprocess_workers_log_line(data_cfg, nw_cfg), flush=True)
+    n = len(idx_df)
+    nw_cfg = resolve_preprocess_worker_count(
+        data_cfg,
+        n_samples=n,
+        grid_shape=(in_ch, grid_h, grid_w),
+        mcelog_path=mcelog_path,
+        mcelog_max_rows=int(mcelog_cap) if mcelog_cap is not None else None,
+    )
+    print(
+        preprocess_workers_log_line(
+            data_cfg,
+            nw_cfg,
+            n_samples=n,
+            grid_shape=(in_ch, grid_h, grid_w),
+            mcelog_path=mcelog_path,
+            mcelog_max_rows=int(mcelog_cap) if mcelog_cap is not None else None,
+        ),
+        flush=True,
+    )
 
     print(
         "Building mcelog time index（顺序流式读 CSV + 按 sid 聚合；排序/填网格阶段见上并行度）…",
@@ -705,7 +737,6 @@ def materialize_dataset(
     )
 
     # 按索引行填 X：样本数 n = 索引表行数（与 mcelog 行数无关）
-    n = len(idx_df)
     X = np.zeros((n, in_ch, grid_h, grid_w), dtype=np.float32)
     sids_arr = idx_df["sid"].astype(str).to_numpy()
     pts_arr = idx_df["predict_ts"].to_numpy(dtype=np.float64)
@@ -726,7 +757,8 @@ def materialize_dataset(
 
     if use_mp:
         k = min(nw_cfg, max(1, n))
-        batches = [b for b in np.array_split(np.arange(n, dtype=np.int64), k) if len(b) > 0]
+        batches = [b for b in np.array_split(
+            np.arange(n, dtype=np.int64), k) if len(b) > 0]
         print(
             f"Filling grids with fork Pool ({len(batches)} tasks, ~{nw_cfg} workers budget, Linux COW) …",
             flush=True,
@@ -793,7 +825,8 @@ def materialize_dataset(
                         r, c, bk, grid_h, grid_w, n_banks, row_bs, col_bs
                     )
                     if inv_as_grid:
-                        X[i] = concat_spatial_and_inventory_channels(base, tab[i])
+                        X[i] = concat_spatial_and_inventory_channels(
+                            base, tab[i])
                     else:
                         X[i] = base
                 else:
@@ -805,6 +838,10 @@ def materialize_dataset(
             f"警告：{n_empty_grids}/{n} 条样本在 mcelog 窗口内无事件（sid 缺失或窗口为空），对应 X 行为全零。",
             flush=True,
         )
+
+    # 填网格完成后 events 不再使用；尽早释放以降低 drop/save 阶段峰值。
+    del events
+    gc.collect()
 
     drop_empty = bool(data_cfg.get("drop_empty_mcelog_windows", True))
     n_before_drop = int(n)
@@ -856,6 +893,19 @@ def materialize_dataset(
 
     meta.to_csv(processed_dir / "meta.csv", index=False)
 
+    pos_rate = float(y.mean()) if n else 0.0
+    del X, tab
+    gc.collect()
+
+    ram_snap = ram_budget_snapshot(
+        data_cfg,
+        nw_cfg,
+        n_samples=n,
+        grid_shape=(in_ch, grid_h, grid_w),
+        mcelog_path=mcelog_path,
+        mcelog_max_rows=int(mcelog_cap) if mcelog_cap is not None else None,
+    )
+
     # manifest：供 validate / train 校验 grid_shape、并行阶段是否启用等
     manifest: dict[str, Any] = {
         "schema": "tianchi_spatial_heatmap" if spatial else "legacy_rc_et",
@@ -868,12 +918,23 @@ def materialize_dataset(
         "label_horizon_seconds": bt_used,
         "label_backtrace_seconds": bt_used,
         "label_failure_types": list(data_cfg.get("label_failure_types", [1, 2, 3])),
-        "pos_rate": float(y.mean()) if n else 0.0,
+        "pos_rate": pos_rate,
         "inventory_path": str(inv_path) if inv_path else None,
         "inventory_as_grid_channels": bool(spatial and inv_as_grid),
         "materialize_seed": int(seed),
         "preprocess_workers_requested": int(nw_cfg),
         "preprocess_parallel_frac": effective_preprocess_parallel_frac_recorded(data_cfg),
+        "ram_total_gib": ram_snap["ram_total_gib"] if ram_snap else None,
+        "ram_budget_frac": ram_snap["ram_budget_frac"] if ram_snap else None,
+        "ram_budget_gib": ram_snap["ram_budget_gib"] if ram_snap else None,
+        "preprocess_estimated_peak_gib": ram_snap["estimated_peak_gib"] if ram_snap else None,
+        "split_normalize_estimated_peak_gib": (
+            ram_snap["split_normalize_estimated_peak_gib"] if ram_snap else None
+        ),
+        "preprocess_ram_budget_exceeded": ram_snap["exceeds_budget"] if ram_snap else None,
+        "split_normalize_ram_budget_exceeded": (
+            ram_snap["split_normalize_exceeds_budget"] if ram_snap else None
+        ),
         "preprocess_events_finalize_parallel": bool(events_finalize_parallel),
         "preprocess_grid_fill_parallel": grid_fill_parallel_done,
         "n_empty_grids": int(n_empty_grids),
@@ -890,8 +951,11 @@ def materialize_dataset(
         manifest["row_bin_size"] = int(row_bs)
         manifest["col_bin_size"] = int(col_bs)
         manifest["num_bank_channels"] = int(n_banks)
-        manifest["mcelog_error_type_filter"] = ft_filter if ft_filter is not None else [1, 2]
+        manifest["mcelog_error_type_filter"] = ft_filter if ft_filter is not None else [
+            1, 2]
 
-    (processed_dir / "preprocess_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"Preprocess done: N={n}, pos_rate={manifest['pos_rate']:.6f}", flush=True)
+    (processed_dir / "preprocess_manifest.json").write_text(json.dumps(manifest,
+                                                                       indent=2), encoding="utf-8")
+    print(
+        f"Preprocess done: N={n}, pos_rate={manifest['pos_rate']:.6f}", flush=True)
     return manifest

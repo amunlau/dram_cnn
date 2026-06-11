@@ -34,8 +34,10 @@
 
 - 调大 `mcelog_chunk_rows` 不一定减内存；可先设 `data.mcelog_max_rows`、`data.max_index_rows` 做子集试验。
 - 全量训练前将二者设为 `null`。
-- **耗时构成**：顺序扫描 **整表 mcelog** 写入 buckets → **按 sid 做时间排序** → **按索引行填网格 X**。后两段在 **Linux** 上均可按 `preprocess_workers` / `preprocess_parallel_frac` 多进程加速（`fork` + 写时复制）；`preprocess_workers: null` 时默认 **`preprocess_parallel_frac: 0.6`**（约 **60%** `os.cpu_count()` 逻辑核作为进程预算，见 `dram2cnn.utils.preprocess_parallelism`）；manifest 中 `preprocess_events_finalize_parallel` / `preprocess_grid_fill_parallel` 标明是否启用。**顺序读 CSV** 本身仍为单线程流式读取。Windows / macOS 对上述两段保持单进程。
-- 若日志出现 fork 与多线程告警，可在运行预处理前设 **`export OMP_NUM_THREADS=1`**（减少 BLAS 线程与 fork 交互）。
+- **耗时构成**：顺序扫描 **整表 mcelog** 写入 buckets → **按 sid 做时间排序** → **按索引行填网格 X**。后两段在 **Linux** 上均可按 `preprocess_workers` / `preprocess_parallel_frac` 多进程加速（`fork` + 写时复制）；`preprocess_workers: null` 时默认 **`preprocess_parallel_frac: 0.6`**（约 **60%** `os.cpu_count()` 逻辑核作为进程 budget，见 `dram2cnn.utils.preprocess_parallelism`）；manifest 中 `preprocess_events_finalize_parallel` / `preprocess_grid_fill_parallel` 标明是否启用。**顺序读 CSV** 本身仍为单线程流式读取。Windows / macOS 对上述两段保持单进程。
+- **同配置重跑 preprocess**：可直接再次 `bash scripts/preprocess.sh`；split 阶段会覆盖 `splits/` 并刷新归一化（无需手动删 `normalization_stats.json`）。更换索引/horizon/网格时仍须清空 `data/processed` 与 `data/splits`。
+- **64GB 机器 OOM（全量 preprocess）**：全量索引约 **66k 行**时，物化阶段会按索引行分配 X（约 **31 GiB**）；经 `drop_empty_mcelog_windows` 后落盘约 **35k 行 / ~17 GiB**（见 manifest `n_samples_before_drop` / `n_samples`）。默认 **`ram_budget_frac: 0.5`** 将 fork worker 压至 **1**；split/归一化已改为 **memmap + 分块写出 + 按通道归一化**（manifest 含 `split_normalize_estimated_peak_gib`）。启动日志「估算峰值仍超预算」针对 **物化阶段（66k + events）**，属保守预期。若仍 OOM：在**终端**跑 preprocess（勿在 Jupyter 内叠加 Kernel 内存）。**显存** batch 上限仍由 `gpu.vram_budget_frac: 0.8` 控制，与此无关。
+- 若日志出现 fork 与多线程告警，可在运行预处理前设 **`export OMP_NUM_THREADS=1`**（`scripts/lib/env_perf.sh` 已默认设置）。
 
 ## 推理 meta 列
 
@@ -93,10 +95,10 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 
 ## `exp_full_best_ddp` 与演示索引
 
-- `exp_full_best_ddp.yaml` 取消 `max_index_rows` / `mcelog_max_rows` 截断，但 **`index_features_path` 仍来自 `data.yaml`**。
-- 若仍指向 `data/index_stubs/` 演示表，**`run_preprocess` / `run_train` / `train_ddp.sh` 会 RuntimeError**（`assert_full_best_index_not_stub`），不会静默用 stub 跑全量。
-- **全量训练**：`bash scripts/build_index.sh full` 后，在 `data.yaml` 或实验 `overrides.data` 中把 **`index_features_path`** 指到 `data/raw/features_index_*.csv`，再 **清空并重跑 preprocess**。  
-- **训练启动时**：rank0 会打一行 **`数据摘要`**（`log_dataset_health_for_train`），含 `index_features_path`、`preprocess_manifest` 的 `n_samples`、train/val 行数与正例数；若路径含 `index_stubs` / `features_5m_index_demo` 会 **WARNING**（约 500 行），避免误以为已用天池全量表。
+- 仓库默认的 `exp_full_best_ddp.yaml` 已在 **`overrides.data.index_features_path`** 指向 `data/raw/features_index_h300s_step300s_full.csv`，并取消 `max_index_rows` / `mcelog_max_rows` 截断。
+- 若路径仍含 `index_stubs` / `features_5m_index_demo`，**`run_preprocess` / `run_train` / `train_ddp.sh` 会 RuntimeError**（`assert_full_best_index_not_stub`）。
+- **全量流程**：`bash scripts/build_index.sh full` → 清空 `data/processed/*`、`data/splits/*` → `bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml`。manifest 仍约 500 行时，通常是未重跑 preprocess 或磁盘仍是 baseline 产物。
+- **训练启动时**：rank0 会打 **`数据摘要`**（`log_dataset_health_for_train`），含 `index_features_path`、manifest `n_samples`、train/val 正例数；路径含 stub 时会 **WARNING**。
 
 ## 预处理前缺文件 / 长时间读 mcelog 后才失败
 

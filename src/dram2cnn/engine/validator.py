@@ -209,10 +209,17 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
         n_dropped = int(man.get("n_empty_grids_dropped") or 0)
         n_before = int(man.get("n_samples_before_drop") or (n_samples + n_dropped))
         if n_before > 0 and n_empty / n_before >= 0.5:
+            mcelog_cap = man.get("mcelog_max_rows")
+            cfg_cap = cfg.get("data", {}).get("mcelog_max_rows")
+            truncated = mcelog_cap is not None or cfg_cap is not None
+            tail = (
+                "冒烟 mcelog 截断下常见，全量请取消 mcelog_max_rows。"
+                if truncated
+                else "全量模式下空窗比例仍偏高，请核对 sid 对齐、window_seconds 与 mcelog 时间轴。"
+            )
             report["warnings"].append(
                 f"n_empty_grids={n_empty}（已丢弃负样本空窗 {n_dropped}，保留正样本空窗 "
-                f"{int(man.get('n_empty_grids_kept_positive') or 0)}）；"
-                "冒烟 mcelog 截断下常见，全量请取消 mcelog_max_rows。"
+                f"{int(man.get('n_empty_grids_kept_positive') or 0)}）；{tail}"
             )
 
     x_proc = processed_dir / "X.npy"

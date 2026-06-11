@@ -9,8 +9,6 @@ overrides:
   base:
     run_name: exp_tianchi_full_best_ddp
   data:
-    # 全量：先 bash scripts/build_index.sh full，再将 index_features_path 指向全量 CSV，例如：
-    # index_features_path: data/raw/features_index_h300s_step300s_full.csv
     index_features_path: data/raw/features_index_h300s_step300s_full.csv
     max_index_rows: null
     mcelog_max_rows: null
@@ -19,14 +17,13 @@ overrides:
     normalization_method: robust
     time_split:
       min_pos_per_split: 1
-    # 高核数 Linux 服务器：提高预处理 fork 进程预算（112 逻辑核 × 0.85 ≈ 95 worker）
-    preprocess_parallel_frac: 0.85
+    # 系统内存峰值 ≤50%（继承 data.yaml ram_budget_frac；全量 ~66k 行通常压至 worker=1）
+    mcelog_chunk_rows: 400000
   train:
     imbalance:
       positive_oversample_factor: 2
       positive_weight_cap: 50.0
       focal_gamma: 0.5
-    # GPU 训练时 DataLoader 预取（dataset 按样本 copy，适合多 worker）
-    num_workers: 8
-    prefetch_factor: 4
+    num_workers: 2
+    prefetch_factor: 2
     # gpu / ddp 继承 base.yaml（auto 多卡 + 80% 显存 batch）

@@ -7,9 +7,12 @@ from __future__ import annotations
 **`split_by_sid`**：按服务器 ID 分层划分（需样本量足够）。
 
 归一化默认 **`robust`**（median / IQR，对 log1p 后长尾更稳）；可选 `zscore`。
+大数组路径使用 memmap + 按通道拟合/应用，降低 split/normalize 峰值内存。
 """
 
+import gc
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +21,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 NormMethod = Literal["zscore", "robust"]
+
+# 写 split / 归一化时每次处理的样本行数（控制 X[idx] 临时块大小）
+_SPLIT_SAVE_CHUNK_ROWS = 256
 
 
 def _remove_orphan_tabular_splits(splits_dir: Path) -> None:
@@ -32,27 +38,131 @@ def _remove_orphan_tabular_splits(splits_dir: Path) -> None:
             p.unlink()
 
 
-def _fit_grid_normalizer(X_train: np.ndarray, method: NormMethod) -> tuple[np.ndarray, np.ndarray, dict]:
-    """在 X_train [N,C,H,W] 上拟合 per-(C,H,W) 归一化 center/scale。"""
+def _fit_plane_normalizer(X: np.ndarray, method: NormMethod) -> tuple[np.ndarray, np.ndarray, dict]:
+    """在 X [N,H,W] 上拟合 per-(H,W) 归一化 center/scale。"""
     if method == "robust":
-        center = np.median(X_train, axis=0, keepdims=True)
-        q75 = np.percentile(X_train, 75, axis=0, keepdims=True)
-        q25 = np.percentile(X_train, 25, axis=0, keepdims=True)
+        center = np.median(X, axis=0)
+        q75 = np.percentile(X, 75, axis=0)
+        q25 = np.percentile(X, 25, axis=0)
         iqr = q75 - q25
-        mad = np.median(np.abs(X_train - center), axis=0, keepdims=True)
-        std = X_train.std(axis=0, keepdims=True) + 1e-6
+        mad = np.median(np.abs(X - center), axis=0)
+        std = X.std(axis=0) + 1e-6
         scale = np.where(iqr > 1e-6, iqr, np.where(mad > 1e-6, mad, std))
         note = (
             "Per (C,H,W) median/IQR from X_train; IQR≈0 时回退 MAD，再回退 std，"
             "缓解稀疏 voxel 在 val/test 上爆炸。"
         )
     elif method == "zscore":
-        center = X_train.mean(axis=0, keepdims=True)
-        scale = X_train.std(axis=0, keepdims=True) + 1e-6
+        center = X.mean(axis=0)
+        scale = X.std(axis=0) + 1e-6
         note = "Per (C,H,W) mean/std from X_train only."
     else:
         raise ValueError(f"Unsupported normalization method: {method}")
     return center, scale + 1e-6, {"method": method, "note": note}
+
+
+def _fit_grid_normalizer(X_train: np.ndarray, method: NormMethod) -> tuple[np.ndarray, np.ndarray, dict]:
+    """在 X_train [N,C,H,W] 或 tabular 伪网格 [N,F,1,1] 上拟合 per-(C,H,W) 归一化。"""
+    if X_train.ndim == 4:
+        c = int(X_train.shape[1])
+        centers = []
+        scales = []
+        norm_meta: dict | None = None
+        for ch in range(c):
+            center_ch, scale_ch, meta = _fit_plane_normalizer(
+                np.asarray(X_train[:, ch], dtype=np.float64), method
+            )
+            centers.append(center_ch)
+            scales.append(scale_ch)
+            if norm_meta is None:
+                norm_meta = meta
+        center = np.stack(centers, axis=0)
+        scale = np.stack(scales, axis=0)
+        assert norm_meta is not None
+        return center, scale, norm_meta
+    raise ValueError(f"Expected X_train [N,C,H,W], got {X_train.shape}")
+
+
+def _save_indexed_rows(
+    arr: np.ndarray,
+    idx: np.ndarray,
+    path: Path,
+    *,
+    chunk_rows: int = _SPLIT_SAVE_CHUNK_ROWS,
+) -> None:
+    """将 ``arr[idx]`` 写入 ``path``；4D 网格按行分块，避免一次性 materialize 整个 split。"""
+    n_out = int(len(idx))
+    if n_out == 0:
+        np.save(path, arr[idx])
+        return
+    if arr.ndim == 1:
+        out = np.empty(n_out, dtype=arr.dtype)
+        for start in range(0, n_out, chunk_rows):
+            sl = idx[start : start + chunk_rows]
+            out[start : start + len(sl)] = arr[sl]
+        np.save(path, out)
+        return
+    if arr.ndim == 2:
+        out = np.empty((n_out, arr.shape[1]), dtype=arr.dtype)
+        for start in range(0, n_out, chunk_rows):
+            sl = idx[start : start + chunk_rows]
+            out[start : start + len(sl)] = arr[sl]
+        np.save(path, out)
+        return
+    if arr.ndim != 4:
+        np.save(path, arr[idx])
+        return
+
+    shape = (n_out,) + tuple(int(x) for x in arr.shape[1:])
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    if tmp.is_file():
+        tmp.unlink()
+    out_mm = np.lib.format.open_memmap(str(tmp), mode="w+", dtype=arr.dtype, shape=shape)
+    try:
+        for start in range(0, n_out, chunk_rows):
+            sl = idx[start : start + chunk_rows]
+            block = np.asarray(arr[sl])
+            end = start + block.shape[0]
+            out_mm[start:end] = block
+            del block
+    finally:
+        del out_mm
+    os.replace(tmp, path)
+
+
+def _apply_grid_normalization_channelwise(
+    splits_dir: Path,
+    center: np.ndarray,
+    scale: np.ndarray,
+    *,
+    clip: float | None,
+) -> None:
+    """按通道读写各 split 的 X_*.npy，峰值约为单通道 float64 + 输出 memmap。"""
+    out = Path(splits_dir)
+    c = int(center.shape[0])
+    clip_val = float(clip) if clip is not None and float(clip) > 0 else None
+    for name in ("train", "val", "test"):
+        p = out / f"X_{name}.npy"
+        X = np.load(p, mmap_mode="r")
+        if X.ndim != 4 or X.shape[1:] != center.shape:
+            raise ValueError(f"Shape mismatch {p.name}: {X.shape} vs center {center.shape}")
+        tmp = p.with_suffix(p.suffix + ".normtmp")
+        if tmp.is_file():
+            tmp.unlink()
+        Xout = np.lib.format.open_memmap(
+            str(tmp), mode="w+", dtype=np.float32, shape=X.shape
+        )
+        try:
+            for ch in range(c):
+                X_ch = np.asarray(X[:, ch], dtype=np.float64)
+                Xn = ((X_ch - center[ch]) / scale[ch]).astype(np.float32, copy=False)
+                if clip_val is not None:
+                    np.clip(Xn, -clip_val, clip_val, out=Xn)
+                Xout[:, ch] = Xn
+                del X_ch, Xn
+        finally:
+            del X, Xout
+        os.replace(tmp, p)
 
 
 def normalize_split_features_by_train(
@@ -77,31 +187,37 @@ def normalize_split_features_by_train(
     train_path = out / "X_train.npy"
     if not train_path.exists():
         raise FileNotFoundError(f"Missing {train_path}; cannot fit normalization.")
-    X_train = np.load(train_path).astype(np.float64, copy=False)
-    if X_train.ndim != 4:
-        raise ValueError(f"Expected X_train [N,C,H,W], got {X_train.shape}")
+    X_train_mm = np.load(train_path, mmap_mode="r")
+    if X_train_mm.ndim != 4:
+        raise ValueError(f"Expected X_train [N,C,H,W], got {X_train_mm.shape}")
 
-    center, scale, norm_meta = _fit_grid_normalizer(X_train, method)
-    for name in ("train", "val", "test"):
-        p = out / f"X_{name}.npy"
-        X = np.load(p).astype(np.float64, copy=False)
-        if X.ndim != 4 or X.shape[1:] != X_train.shape[1:]:
-            raise ValueError(f"Shape mismatch {p.name}: {X.shape} vs train {X_train.shape}")
-        Xn = ((X - center) / scale).astype(np.float32)
-        if clip is not None and float(clip) > 0:
-            Xn = np.clip(Xn, -float(clip), float(clip))
-        np.save(p, Xn)
+    c, h, w = (int(X_train_mm.shape[1]), int(X_train_mm.shape[2]), int(X_train_mm.shape[3]))
+    center = np.empty((c, h, w), dtype=np.float64)
+    scale = np.empty((c, h, w), dtype=np.float64)
+    norm_meta: dict | None = None
+    for ch in range(c):
+        center[ch], scale[ch], meta = _fit_plane_normalizer(
+            np.asarray(X_train_mm[:, ch], dtype=np.float64), method
+        )
+        if norm_meta is None:
+            norm_meta = meta
+    del X_train_mm
+    gc.collect()
+    assert norm_meta is not None
+
+    _apply_grid_normalization_channelwise(out, center, scale, clip=clip)
 
     stats: dict = {
         "fit_split": "train",
         "normalized": True,
         "axes": [0],
         "method": norm_meta["method"],
-        "center_shape": list(center.squeeze(axis=0).shape),
-        "scale_shape": list(scale.squeeze(axis=0).shape),
+        "center_shape": list(center.shape),
+        "scale_shape": list(scale.shape),
         "epsilon": 1e-6,
         "clip": (float(clip) if clip is not None and float(clip) > 0 else None),
         "note": norm_meta["note"],
+        "low_memory_channelwise": True,
     }
     if method == "zscore":
         stats["mean_shape"] = stats["center_shape"]
@@ -150,25 +266,25 @@ def _save_split(
     name: str,
     tab: np.ndarray | None = None,
 ) -> None:
-    np.save(out / f"X_{name}.npy", X[idx])
-    np.save(out / f"y_{name}.npy", y[idx])
+    _save_indexed_rows(X, idx, out / f"X_{name}.npy")
+    _save_indexed_rows(y, idx, out / f"y_{name}.npy")
     if tab is not None:
-        np.save(out / f"tabular_{name}.npy", tab[idx])
+        _save_indexed_rows(tab, idx, out / f"tabular_{name}.npy")
     meta_out = meta.loc[idx].reset_index(drop=True)
     meta_out.to_csv(out / f"meta_{name}.csv", index=False)
 
 
 def _load_processed_arrays(pdir: Path) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, np.ndarray | None]:
-    """加载 processed 产物；缺文件时给出明确路径提示。"""
+    """加载 processed 产物；X 用 memmap 只读，避免 split 阶段再占一份整表 RSS。"""
     for name in ("X.npy", "y.npy", "meta.csv"):
         p = pdir / name
         if not p.is_file():
             raise FileNotFoundError(f"缺少预处理产物 {p}；请先运行 preprocess。")
-    X = np.load(pdir / "X.npy")
+    X = np.load(pdir / "X.npy", mmap_mode="r")
     y = np.load(pdir / "y.npy")
     meta = pd.read_csv(pdir / "meta.csv")
     tab_path = pdir / "tabular.npy"
-    tab = np.load(tab_path) if tab_path.is_file() else None
+    tab = np.load(tab_path, mmap_mode="r") if tab_path.is_file() else None
     return X, y, meta, tab
 
 
@@ -224,9 +340,14 @@ def _write_splits_and_normalize(
     out.mkdir(parents=True, exist_ok=True)
     if tab is None:
         _remove_orphan_tabular_splits(out)
+    stats_path = out / "normalization_stats.json"
+    if stats_path.is_file():
+        stats_path.unlink()
     _save_split(X, y, meta, train_idx, out, "train", tab)
     _save_split(X, y, meta, val_idx, out, "val", tab)
     _save_split(X, y, meta, test_idx, out, "test", tab)
+    del X, y, tab
+    gc.collect()
     normalize_split_features_by_train(
         out,
         method=_resolve_norm_method(normalization_method),
@@ -292,23 +413,19 @@ def split_by_time(
         raise ValueError("meta.csv 需含 predict_ts 列（由 preprocess 写入）")
 
     order = np.argsort(meta["predict_ts"].to_numpy(), kind="mergesort")
-    meta_o = meta.iloc[order].reset_index(drop=True)
-    X_o = X[order]
-    y_o = y[order]
-    tab_o = tab[order] if tab is not None else None
-    n = len(meta_o)
+    n = len(meta)
     if n < 3:
         raise ValueError("样本过少，无法按时间切分（至少需要 3 条）")
 
     n_train, n_val, n_test = _compute_time_split_sizes(n, train_ratio, val_ratio, test_ratio)
 
-    train_idx = np.arange(0, n_train)
-    val_idx = np.arange(n_train, n_train + n_val)
-    test_idx = np.arange(n_train + n_val, n)
+    train_idx = order[:n_train]
+    val_idx = order[n_train : n_train + n_val]
+    test_idx = order[n_train + n_val :]
 
     out = Path(splits_dir)
     _write_splits_and_normalize(
-        X_o, y_o, meta_o, tab_o,
+        X, y, meta, tab,
         train_idx, val_idx, test_idx,
         out,
         normalization_method=normalization_method,

@@ -95,10 +95,13 @@ grid_max_col: 4095
 
 preprocess_workers: null
 # null 时 worker 预算 = floor(os.cpu_count() × preprocess_parallel_frac)；112 核 × 0.6 ≈ 67
-# 全量实验 exp_full_best_ddp 覆盖为 0.85；共享集群可降至 0.3 或设 preprocess_workers: 1
 preprocess_parallel_frac: 0.6
 
-# mcelog 流式读分块行数；大内存服务器可增至 1000000（见 exp_full_best_ddp）
+# 预处理峰值系统内存预算（非显存）：按样本数/网格/mcelog 自动 min(CPU, RAM) worker
+ram_total_gib: null   # null = 读 /proc/meminfo MemTotal
+ram_budget_frac: 0.5  # 系统内存峰值目标 ≤50% MemTotal（非显存；显存见 base.gpu.vram_budget_frac）
+
+# mcelog 流式读分块行数；内存紧张（如 64GB 全量）可降至 250000～400000
 mcelog_chunk_rows: 1000000
 max_index_rows: null
 mcelog_max_rows: null

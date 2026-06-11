@@ -44,3 +44,13 @@ def test_production_experiments_inherit_ddp_auto(yaml_name: str) -> None:
     for scope in ("train", "infer"):
         ddp_cfg = merged_scope_section(cfg, "ddp", scope)
         assert resolve_ddp_enabled(ddp_cfg.get("enabled", "auto"), "cuda", 3) is True
+
+
+def test_full_best_ddp_low_memory_preprocess_settings() -> None:
+    """全量实验须启用 50% 系统 RAM 预算（继承 data.yaml）。"""
+    cfg = load_experiment_config(EXP_DIR / "exp_full_best_ddp.yaml")
+    data = cfg["data"]
+    assert data.get("ram_budget_frac") == 0.5
+    assert data.get("ram_total_gib") is None
+    assert cfg["train"].get("num_workers") == 2
+    assert cfg["train"].get("prefetch_factor") == 2

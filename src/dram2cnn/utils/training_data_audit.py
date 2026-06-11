@@ -96,12 +96,18 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             n_drop = int(man2.get("n_empty_grids_dropped") or 0)
             denom = max(n_s + n_drop, 1)
             if n_em / denom >= 0.5:
+                truncated = man2.get("mcelog_max_rows") is not None
+                tail = (
+                    "冒烟 mcelog 截断下常见；全量请取消 mcelog_max_rows。"
+                    if truncated
+                    else "全量模式下空窗比例仍偏高，请核对 sid 对齐、window_seconds 与 mcelog 时间轴。"
+                )
                 logger.warning(
-                    "preprocess_manifest: n_empty_grids=%d，已丢弃负样本空窗 %d（保留正样本空窗 %d）；"
-                    "冒烟 mcelog 截断下常见；全量请取消 mcelog_max_rows。",
+                    "preprocess_manifest: n_empty_grids=%d，已丢弃负样本空窗 %d（保留正样本空窗 %d）；%s",
                     n_em,
                     n_drop,
                     int(man2.get("n_empty_grids_kept_positive") or 0),
+                    tail,
                 )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass

@@ -50,7 +50,7 @@
 1. **`index_features_path` 指向哪个文件**：若指向仓库内 `features_5m_index_demo.csv`，则无论 `max_index_rows` 是否为 `null`，**物理行数就只有演示规模**（约 **500 行**）。这是**数据源**层面的上限。  
 2. **`max_index_rows` / `mcelog_max_rows`**：在**已选定文件**的前提下，再对「读多少行索引」「顺序扫描 mcelog 时最多累积多少行」做**调试截断**。这是**工程试跑**层面的上限。
 
-`exp_full_best_ddp.yaml` 的 `overrides` 把第二类设为 `null`，语义是「**不要**在试跑阶段再砍索引行、不要提前结束 mcelog 扫描」。它**不会**自动把第一类换成天池官方全量索引文件。若需要「竞赛级全量」，必须显式修改 `data.yaml` 的 `index_features_path`，或在实验 `overrides.data` 里覆盖该键，并**清空 `processed/`、`splits/` 后重跑 preprocess**——否则磁盘上的张量仍对应先前的索引表。
+`exp_full_best_ddp.yaml` 的 `overrides` 把第二类设为 `null`，语义是「**不要**在试跑阶段再砍索引行、不要提前结束 mcelog 扫描」。**第一类（索引文件路径）** 在仓库默认的 `exp_full_best_ddp.yaml` 中已通过 `overrides.data.index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`；baseline 仍用 `data.yaml` 的演示 stub。若自定义实验 yaml 未覆盖该键，或磁盘上仍是旧 preprocess 产物，则须 **`build_index.sh full` + 清空 `processed/`/`splits/` 后重跑 preprocess**。
 
 这一区分是本项目文档中反复强调的**心智模型**：**改数据源路径 = 新一次数据构建；改 max_* = 同一张源表上的子集实验**。
 
@@ -279,11 +279,25 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ### 5.10 `preprocess_workers` 与 `preprocess_parallel_frac`
 
-在 Linux 上，预处理的部分阶段可用多进程（fork + 写时复制）。`preprocess_workers: null` 表示「自动按 CPU 核数 × 比例推算预算」。`preprocess_parallel_frac: 0.6` 表示大约使用 **60% 逻辑核** 作为进程预算上限（112 核 ≈ 67 worker）。**全量实验 `exp_full_best_ddp` 默认覆盖为 0.85**（≈95 worker），以更好利用高核数服务器。
+在 Linux 上，预处理的部分阶段可用多进程（fork + 写时复制）。`preprocess_workers: null` 表示「自动按 CPU 核数 × 比例推算预算」。`preprocess_parallel_frac: 0.6` 表示大约使用 **60% 逻辑核** 作为进程预算上限（112 核 ≈ 67 worker）。
 
-**适用情况**：共享集群上为避免占满机器，可在实验 overrides 里把 `preprocess_parallel_frac` 降到 `0.3` 或设 `preprocess_workers: 1` 关闭并行。
+**全量实验 `exp_full_best_ddp`**：继承 **`ram_budget_frac: 0.5`**（系统内存峰值 ≤50% MemTotal），全量 ~66k 行时通常压至 **worker=1**；日志打印 RAM 预算与估算峰值。
+
+**适用情况**：共享集群上为避免占满机器，可降至 `ram_budget_frac: 0.3` 或设 `preprocess_workers: 1`。
 
 **原因**：顺序读 mcelog 仍是单线程流式；并行主要体现在「按 sid 排序合并」「填网格」等 CPU 密集段，详见 `preprocess_manifest.json` 中布尔标记。
+
+### 5.10.1 `ram_total_gib` 与 `ram_budget_frac`（系统内存，非显存）
+
+由 `dram2cnn.utils.preprocess_parallelism` 在已知样本数与网格形状后估算 preprocess 峰值 RSS，取 **`min(CPU 预算 worker, RAM 预算 worker)`**。
+
+- `ram_total_gib`：`null` 时读 `/proc/meminfo` 的 MemTotal。
+- `ram_budget_frac`：默认 **`0.5`**（峰值目标 ≤ 总内存的 **50%**；64GB → **32 GiB**）。设为 `null` 可关闭 RAM 限制。
+- `preprocess_ignore_ram_budget: true`：跳过 RAM 限制，仅用 CPU 比例（高内存专用机）。
+
+manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess_ram_budget_exceeded`，以及 split/归一化阶段的 `split_normalize_estimated_peak_gib`、`split_normalize_ram_budget_exceeded`。split 阶段默认 **memmap 读 X + 分块写出 + 按通道归一化**（`normalization_stats.json` 中 `low_memory_channelwise: true`）。
+
+**与显存区别**：训练/推理 batch 探测使用 `base.gpu.vram_budget_frac`（默认 **0.8**，即 GPU 显存 80%），与上述系统 RAM 预算是两套独立机制。
 
 ### 5.11 `mcelog_chunk_rows`
 
@@ -294,7 +308,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 - `max_index_rows`：只读索引表前 N 行（`null` 表示全表）。  
 - `mcelog_max_rows`：顺序扫描 mcelog 时最多读入多少行用于建桶（`null` 表示直到文件结束）。
 
-**与 full_best 的关系**：`exp_full_best_ddp` 将二者设为 `null`，表示**在已选定的索引文件与完整 mcelog 上**不做提前截断。**不**改变索引文件本身。
+**与 full_best 的关系**：`exp_full_best_ddp` 将二者设为 `null`，并在 `overrides.data.index_features_path` 指向全量 CSV（默认 `data/raw/features_index_h300s_step300s_full.csv`），表示在**全量索引 + 完整 mcelog** 上不做调试截断。
 
 ### 5.13 `split_strategy` 与 `time_split`
 
@@ -349,7 +363,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 - `batch_size`：默认 256。DDP 下为**每进程 per-GPU batch**（总有效 batch ≈ `batch_size × world_size`）。  
 - `epochs` / `lr` / `weight_decay`：标准监督学习超参。  
-- `num_workers`：DataLoader worker；默认 `0`（冒烟/调试）。**全量 `exp_full_best_ddp` 默认 8**，配合 `prefetch_factor: 4` 与 Linux `fork` 上下文预取网格样本。  
+- `num_workers`：DataLoader worker；默认 `0`（冒烟/调试）。**全量 `exp_full_best_ddp` 默认 2**，配合 `prefetch_factor: 2`（64GB 机器省内存）。  
 - `max_grad_norm`：梯度裁剪；在强 class weight 下抑制爆炸步长。  
 - `cudnn_benchmark`：以可复现性换吞吐；论文终稿阶段若需严格比特一致可关。
 
@@ -409,8 +423,8 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 | 网格 / horizon | 继承 `data.yaml`：**spatial_heatmap** + **5min** 窗/标签 | 同左 |
 | 模型片段 | **`model_smoke.yaml`**（轻量 GridCNN） | **`model.yaml`**（完整 GridCNN-Deep） |
 | 模型张量 | **`31×128×32`**，`tabular_dim=0` | 同左 |
-| 训练预算 | `epochs=20`，`patience=6`；train/infer **关闭 DDP 与 auto_batch** | `epochs=300`，`num_workers=8`；**gpu/ddp 继承 base（auto 多卡 + 80% 显存）** |
-| 典型用途 | 冒烟、CI、`autotune.sh` | 取消截断后的全量 preprocess/train；**须** `build_index --mode full` 并改 `index_features_path` |
+| 训练预算 | `epochs=20`，`patience=6`；train/infer **关闭 DDP 与 auto_batch** | 继承 `train.yaml`（`epochs=300`）；**`num_workers=2`**；**gpu/ddp 继承 base（auto 多卡 + 80% 显存）** |
+| 典型用途 | 冒烟、CI、`autotune.sh` | 全量 preprocess/train；**须** `build_index.sh full`；仓库默认已在 overrides 指向全量索引 |
 
 **方法**：新人应先跑通 baseline，再切 full_best；切忌以为「full_best 文件名」就自动下载了天池数据。
 
@@ -596,7 +610,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 答：因为磁盘上的 `X_train.npy` 形状与当前 `model.yaml` 不一致。必须重跑 preprocess 与切分，并确认实验未在 overrides 里覆盖成不一致的 model 段。
 
 **问：`exp_full_best_ddp` 已经写了全量，为什么 manifest 里 n 还是约 500？**  
-答：「全量」在实验文件里指 `max_index_rows`/`mcelog_max_rows` 为 `null`；**索引路径仍是 `data.yaml` 的 `index_features_path`**。若仍指向 stub，**`run_preprocess` / `run_train` 会直接 RuntimeError**（`assert_full_best_index_not_stub`）。请 `build_index.sh full`、改 `index_features_path` 并清产物重跑 preprocess。
+答：「全量」指 `max_index_rows`/`mcelog_max_rows` 为 `null`，且 **`index_features_path` 指向全量 CSV**（`exp_full_best_ddp.yaml` 默认已覆盖为 `data/raw/features_index_h300s_step300s_full.csv`）。若 manifest 仍约 500 行，常见原因是 **未 `build_index.sh full`、未清空 `processed/`/`splits/` 重跑 preprocess**，或仍用 baseline 实验。若路径仍含 stub，**`assert_full_best_index_not_stub` 会直接报错**。
 
 **问：能否让 baseline 与 full_best 同时存在两个不同索引？**  
 答：可以。复制两份实验 yaml，在各自 `overrides.data.index_features_path` 写不同路径；或复制两份 `data` 片段文件并在实验中 `data: my_data_a.yaml` / `my_data_b.yaml` 指向它们。
@@ -641,8 +655,8 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 **第 1 步：选择实验入口**  
 决定本次产物写入 `runs/exp_tianchi_full_best_ddp/`（或你自定义的 `run_name`）。若沿用仓库文件，则实验 yaml 为 `configs/experiments/exp_full_best_ddp.yaml`。若你希望保留原 `run_name` 语义但改目录名，可在 `overrides.base.run_name` 写新字符串——注意这会改变 `runs/` 下文件夹名，所有后续脚本必须仍指向**同一份**实验 yaml。
 
-**第 2 步：声明全量索引路径（二选一）**  
-全局改法：编辑 `configs/data.yaml` 的 `index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（或你生成的全量 CSV）。分叉改法：仅在 `exp_full_best_ddp.yaml` 的 `overrides.data` 增加 `index_features_path: data/raw/features_index_h300s_step300s_full.csv`，使 baseline 仍指向演示表。**原因**：团队常需要「小跑验证脚本」与「大跑训练」并行，分叉改法减少来回改主文件的差错。
+**第 2 步：确认全量索引路径**  
+仓库默认的 `exp_full_best_ddp.yaml` 已在 `overrides.data.index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（须先 **`bash scripts/build_index.sh full`** 生成该文件）。若使用自定义实验 yaml，请显式设置该键；baseline 仍指向演示 stub 以便并行冒烟。
 
 **第 3 步：确认截断开关**  
 在 full_best 实验中，`max_index_rows` 与 `mcelog_max_rows` 应为 `null`。若你误把 baseline 的 `500`/`800000` 复制过来，会在全表上仍只读 500 行索引——这是典型的「复制粘贴 overrides」错误。

@@ -83,7 +83,7 @@ flowchart LR
 | `scripts/train_ddp.sh` | 全量多卡训练入口（调用 `train.sh`） |
 | `scripts/optuna.sh` | GridCNN-Deep 超参搜索（Optuna，trial 内 DDP） |
 | `scripts/autotune.sh` | preprocess → train → infer → evaluate 一键冒烟 |
-| `scripts/clean.sh` | 清理 runs、processed/splits、outputs 生成物、缓存（可选 `--notebooks` 清输出） |
+| `scripts/clean.sh` | 清理 runs、processed/splits、outputs、缓存（`--notebooks` 清输出；`--purge-indexes` 删全量索引） |
 | `scripts/inspect_data.sh` | 原始 CSV / 索引 / manifest 快速体检 |
 | `scripts/verify_ddp.sh` | 多卡 DDP 回归验证（需 ≥2 GPU） |
 
@@ -158,17 +158,16 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 
 | 阶段 | 并行方式 | 配置 |
 |------|----------|------|
-| **预处理** | mcelog 按 sid 排序 + 填网格 `fork` Pool | `data.preprocess_parallel_frac`（默认 **0.6**；全量 `exp_full_best_ddp` **0.85**） |
+| **预处理** | mcelog 按 sid 排序 + 填网格 `fork` Pool | 默认 **`ram_budget_frac: 0.5`**（系统内存峰值 ≤50%）；`preprocess_parallel_frac: 0.6` |
 | **训练 / 推理** | 单卡或 **DDP 多卡** + 80% 显存 batch 探测 | `base.yaml` 的 `gpu` / `ddp`；`bash scripts/train.sh` / `infer.sh` |
-| **DataLoader** | 多 worker 预取 | `train.yaml` 默认 **0**；`exp_full_best_ddp` 覆盖 **8**，配合 `prefetch_factor` |
+| **DataLoader** | 多 worker 预取 | `train.yaml` 默认 **0**；`exp_full_best_ddp` 覆盖 **2**，配合 `prefetch_factor: 2` |
 
 脚本会自动 `source scripts/lib/env_perf.sh`（`OMP_NUM_THREADS=1` 等），避免 fork 与 BLAS 线程冲突。
 
 ```bash
 # 全量 + 3 卡 DDP（示例）
 bash scripts/build_index.sh full
-# 必须在 exp_full_best_ddp.yaml（或 data.yaml）设置全量索引，并清空旧产物：
-#   index_features_path: data/raw/features_index_h300s_step300s_full.csv
+# exp_full_best_ddp.yaml 已默认指向全量索引；须清空旧产物后 preprocess：
 rm -rf data/processed/* data/splits/*
 bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
 CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml

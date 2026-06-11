@@ -25,6 +25,6 @@
 | `--sample-interval-seconds 600` | 每 10 分钟一个预测锚点 |
 | `--window-seconds 1800` | 特征窗长度（须与实验 `window_seconds` 一致；CLI 未指定时默认等于 horizon） |
 
-生成后更新 `configs/data.yaml` 的 `index_features_path`（或实验 yaml overrides），并 **重跑 preprocess**。
+生成后在 `configs/data.yaml` 或实验 yaml 的 `overrides.data.index_features_path` 中指向该 CSV 并 **重跑 preprocess**（`exp_full_best_ddp.yaml` 已默认指向 `data/raw/features_index_h300s_step300s_full.csv`）。
 
 字段与形状见 `docs/data_dictionary.md`、`docs/data_processing_guide.md`。

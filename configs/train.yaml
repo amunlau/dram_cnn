@@ -3,7 +3,7 @@ batch_size: 256
 epochs: 300
 lr: 0.001
 weight_decay: 0.0001
-# DataLoader worker：0=主进程加载（调试/网络盘更稳）；Linux + 本地盘全量训练建议 4～8（见 exp_full_best_ddp）
+# DataLoader worker：0=主进程加载（调试/网络盘更稳）；全量实验见 exp_full_best_ddp（num_workers=2）
 num_workers: 0
 prefetch_factor: 4
 # 对总梯度 L2 范数裁剪；极不平衡 + 高 class weight 时建议开启（常见 1.0）。

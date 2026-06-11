@@ -17,4 +17,4 @@
 
 默认 `.gitignore` 会忽略 `outputs/` 下生成的大文件，仅保留 `.gitkeep` 与本说明。需要长期保留某次分析结果时，可复制到 `docs/` 或独立制品存储。
 
-一键清理：`bash scripts/clean.sh`（可选 `--notebooks` 清除 Notebook 单元格输出）。
+一键清理：`bash scripts/clean.sh`（`--notebooks` 清除 Notebook 单元格输出；`--purge-indexes` 删除可再生全量索引）。

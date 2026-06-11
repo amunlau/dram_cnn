@@ -58,9 +58,21 @@ def test_preprocess_full_best_stub_raises() -> None:
         assert_full_best_index_not_stub(cfg, context="run_preprocess")
 
 
-def test_validate_horizon_config_only_with_no_require_splits() -> None:
-    """磁盘上为 baseline preprocess 产物时，horizon 实验仍可做配置级 validate。"""
+def test_validate_horizon_config_only_with_no_require_splits(tmp_path: Path) -> None:
+    """有 processed 产物时，horizon 实验仍可做配置级 validate（不依赖仓库磁盘状态）。"""
+    import numpy as np
+
+    proc = tmp_path / "processed"
+    proc.mkdir()
+    (proc / "preprocess_manifest.json").write_text(
+        '{"grid_shape": [31, 128, 32], "window_seconds": 1800, "label_horizon_seconds": 1800}',
+        encoding="utf-8",
+    )
+    np.save(proc / "X.npy", np.zeros((4, 31, 128, 32), dtype=np.float32))
+    np.save(proc / "y.npy", np.zeros(4, dtype=np.int64))
+
     cfg = load_experiment_config("configs/experiments/exp_horizon_30m.yaml")
+    cfg["data"] = {**cfg["data"], "processed_dir": str(proc)}
     report = validate_experiment(cfg, require_splits=False)
     assert "expected_shape" in report
     assert report["checks"]["processed"]["exists"] is True
