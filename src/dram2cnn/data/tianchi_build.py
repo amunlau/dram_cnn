@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import sys
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -60,8 +61,8 @@ def _preprocess_fork_parallel_available() -> bool:
     return sys.platform.startswith("linux")
 
 
-def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
-    """fork Pool 子任务：处理一批全局样本行号 indices，返回 (indices, 对应 X 块, 空窗跳过数)。
+def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, int, np.ndarray]:
+    """fork Pool 子任务：处理一批全局样本行号 indices，返回 (indices, X 块, 空窗数, 空窗行号)。
 
     父进程在 pool 前设置 _WORKER_CTX；每个子进程只读 events/tabular，写本地 out 再拼回主数组。
     """
@@ -78,6 +79,7 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, in
     pts = ctx["pts"]
     out = np.zeros((len(indices), inch, gh, gw), dtype=np.float32)
     n_skip = 0
+    skipped: list[int] = []
     for j, ii in enumerate(indices):
         i = int(ii)
         sid = str(sids[i])
@@ -85,6 +87,7 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, in
         sl = window_slice(events, sid, pt, win)
         if sl is None:
             n_skip += 1
+            skipped.append(i)
             continue
         if mode == "spatial":
             r, c, _e, _t, bk = sl
@@ -102,7 +105,7 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, in
             r, c, e, _t, _bk = sl
             leg_in = int(ctx.get("legacy_in_channels", 3))
             out[j] = fill_log1p_grid(r, c, e, gh, gw, leg_in)
-    return indices.astype(np.int64), out, n_skip
+    return indices.astype(np.int64), out, n_skip, np.asarray(skipped, dtype=np.int64)
 
 
 def _finalize_sid_chunk(sids: tuple[str, ...]) -> dict[str, dict[str, np.ndarray]]:
@@ -366,11 +369,19 @@ def load_index_table(
     )
     df["predict_ts"] = rel_ts
     if max_rows is not None and int(max_rows) > 0 and len(df) > int(max_rows):
-        df = (
-            df.sort_values("predict_ts", kind="mergesort")
-            .iloc[: int(max_rows)]
-            .reset_index(drop=True)
-        )
+        n_keep = int(max_rows)
+        df_sorted = df.sort_values("predict_ts", kind="mergesort").reset_index(drop=True)
+        if len(df_sorted) > n_keep:
+            warnings.warn(
+                f"索引表 {path.name} 共 {len(df_sorted)} 行，max_index_rows={n_keep} "
+                "将按时间轴均匀子采样（非仅保留最早段）。",
+                UserWarning,
+                stacklevel=2,
+            )
+            pick = np.linspace(0, len(df_sorted) - 1, n_keep, dtype=int)
+            df = df_sorted.iloc[pick].reset_index(drop=True)
+        else:
+            df = df_sorted
     df["predict_time"] = [relative_seconds_to_predict_time_str(float(t)) for t in df["predict_ts"]]
     return df
 
@@ -396,10 +407,16 @@ def merge_ticket_labels(
     bt = float(label_horizon_seconds)
     sids = index_df["sid"].astype(str).to_numpy()
     pts_arr = index_df["predict_ts"].to_numpy(dtype=np.float64)
-    for i in range(len(index_df)):
-        sid = str(sids[i])
-        if failure_in_horizon(float(pts_arr[i]), by_sid_fail.get(sid), bt):
-            y[i] = 1
+    for sid in np.unique(sids):
+        fail_times = by_sid_fail.get(str(sid))
+        if fail_times is None or fail_times.size == 0:
+            continue
+        m = sids == sid
+        pts = pts_arr[m]
+        pos = np.flatnonzero(m)
+        for ft in fail_times:
+            hit = (pts <= float(ft)) & (pts + bt >= float(ft))
+            y[pos[hit]] = 1
     return y
 
 
@@ -498,6 +515,52 @@ def concat_spatial_and_inventory_channels(spatial_banks: np.ndarray, inv_vec: np
     return np.concatenate([spatial_banks.astype(np.float32, copy=False), tiled], axis=0)
 
 
+def _validate_index_sidecar_against_config(
+    idx_stats: dict[str, Any],
+    data_cfg: dict[str, Any],
+    *,
+    mcelog_cap: int | None,
+    time_epoch_offset: float,
+) -> None:
+    """校验索引 sidecar 与当前 preprocess 配置一致（时间轴、截断行数、W/H）。"""
+    idx_off = idx_stats.get("time_epoch_offset_absolute")
+    if idx_off is not None and abs(float(idx_off) - time_epoch_offset) > 1.0:
+        raise ValueError(
+            f"索引 sidecar time_epoch_offset_absolute={float(idx_off):.3f} "
+            f"与 preprocess 扫描值 {time_epoch_offset:.3f} 不一致；"
+            "请重建索引（bash scripts/build_index.sh smoke）并清空 data/processed、data/splits。"
+        )
+
+    idx_scan = idx_stats.get("mcelog_scan_rows")
+    if idx_scan is None:
+        idx_scan = (idx_stats.get("config") or {}).get("mcelog_scan_rows")
+    if mcelog_cap is not None and idx_scan is not None and int(idx_scan) != int(mcelog_cap):
+        raise ValueError(
+            f"索引 sidecar mcelog_scan_rows={idx_scan} 与当前 preprocess mcelog_max_rows={mcelog_cap} "
+            "不一致；请用相同截断行数重建索引（bash scripts/build_index.sh smoke）并清空 processed/splits。"
+        )
+
+    cfg_hor = label_horizon_seconds_from_dict(data_cfg)
+    idx_hor = idx_stats.get("label_horizon_seconds")
+    if idx_hor is None:
+        idx_hor = (idx_stats.get("config") or {}).get("label_horizon_seconds")
+    if idx_hor is not None and abs(float(idx_hor) - cfg_hor) > 1e-6:
+        raise ValueError(
+            f"索引 sidecar label_horizon_seconds={idx_hor} 与当前配置 {cfg_hor} 不一致；"
+            "切换 horizon 实验须重建索引（build_horizon_indexes.sh）并清空 processed/splits。"
+        )
+
+    cfg_win = float(data_cfg.get("window_seconds", cfg_hor))
+    idx_win = idx_stats.get("window_seconds")
+    if idx_win is None:
+        idx_win = (idx_stats.get("config") or {}).get("window_seconds")
+    if idx_win is not None and abs(float(idx_win) - cfg_win) > 1e-6:
+        raise ValueError(
+            f"索引 sidecar window_seconds={idx_win} 与当前配置 {cfg_win} 不一致；"
+            "请重建与 window 匹配的索引并清空 processed/splits。"
+        )
+
+
 def materialize_dataset(
     data_cfg: dict[str, Any],
     model_cfg: dict[str, Any],
@@ -589,27 +652,21 @@ def materialize_dataset(
     if stats_path.is_file():
         try:
             idx_stats = json.loads(stats_path.read_text(encoding="utf-8"))
-            idx_off = idx_stats.get("time_epoch_offset_absolute")
-            idx_scan = idx_stats.get("mcelog_scan_rows")
-            if idx_scan is None:
-                cfg_block = idx_stats.get("config") or {}
-                idx_scan = cfg_block.get("mcelog_scan_rows")
-            if mcelog_cap is not None and idx_scan is not None:
-                if int(idx_scan) != int(mcelog_cap):
-                    raise ValueError(
-                        f"索引 sidecar mcelog_scan_rows={idx_scan} 与当前 preprocess mcelog_max_rows={mcelog_cap} "
-                        "不一致；请用相同截断行数重建索引（bash scripts/build_index.sh smoke）并清空 processed/splits。"
-                    )
-            if idx_off is not None and abs(float(idx_off) - time_epoch_offset) > 1.0:
-                raise ValueError(
-                    f"索引 sidecar time_epoch_offset_absolute={float(idx_off):.3f} "
-                    f"与 preprocess 扫描值 {time_epoch_offset:.3f} 不一致；"
-                    "请重建索引（bash scripts/build_index.sh smoke）并清空 data/processed、data/splits。"
-                )
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            if isinstance(exc, ValueError):
-                raise
-            pass
+            _validate_index_sidecar_against_config(
+                idx_stats,
+                data_cfg,
+                mcelog_cap=int(mcelog_cap) if mcelog_cap is not None else None,
+                time_epoch_offset=time_epoch_offset,
+            )
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            warnings.warn(
+                f"无法解析索引 sidecar {stats_path}: {exc}；跳过 sidecar 校验。"
+                "建议重建索引（bash scripts/build_index.sh smoke）。",
+                UserWarning,
+                stacklevel=2,
+            )
+        except ValueError:
+            raise
 
     print("Loading index CSV …", flush=True)
     idx_df = load_index_table(index_path, max_rows, time_epoch_offset=time_epoch_offset)
@@ -663,6 +720,7 @@ def materialize_dataset(
 
     grid_fill_parallel_done = False
     n_empty_grids = 0
+    empty_row_indices: list[int] = []
     global _WORKER_CTX
     leg_in = int(model_cfg.get("in_channels", 3))
 
@@ -696,9 +754,11 @@ def materialize_dataset(
         try:
             ctx_mp = multiprocessing.get_context("fork")
             with ctx_mp.Pool(processes=len(batches)) as pool:
-                for inds, block, skip in pool.map(_fill_indices_batch, batches):
+                for inds, block, skip, skipped in pool.map(_fill_indices_batch, batches):
                     X[inds] = block
                     n_empty_grids += int(skip)
+                    if skipped.size > 0:
+                        empty_row_indices.extend(int(x) for x in skipped)
         finally:
             _WORKER_CTX = None
         grid_fill_parallel_done = True
@@ -725,6 +785,7 @@ def materialize_dataset(
                 sl = window_slice(events, sid, pts, win)
                 if sl is None:
                     n_empty_grids += 1
+                    empty_row_indices.append(i)
                     continue
                 if spatial:
                     r, c, _e, _t, bk = sl
@@ -742,6 +803,37 @@ def materialize_dataset(
     if n_empty_grids > 0:
         print(
             f"警告：{n_empty_grids}/{n} 条样本在 mcelog 窗口内无事件（sid 缺失或窗口为空），对应 X 行为全零。",
+            flush=True,
+        )
+
+    drop_empty = bool(data_cfg.get("drop_empty_mcelog_windows", True))
+    n_before_drop = int(n)
+    n_dropped_empty = 0
+    n_empty_kept_positive = 0
+    # 空窗 = mcelog 特征窗 [predict_ts−W, predict_ts) 内无事件；仅丢弃 y=0 行，避免 rare 正标签因对齐丢失。
+    if drop_empty and empty_row_indices:
+        empty_set = set(int(i) for i in empty_row_indices)
+        keep = np.ones(n, dtype=bool)
+        for i in empty_set:
+            if int(y[i]) == 0:
+                keep[i] = False
+            else:
+                n_empty_kept_positive += 1
+        n_dropped_empty = int((~keep).sum())
+        if n_dropped_empty > 0 or n_empty_kept_positive > 0:
+            X = X[keep]
+            y = y[keep]
+            idx_df = idx_df.loc[keep].reset_index(drop=True)
+            tab = tab[keep]
+            n = int(keep.sum())
+            print(
+                f"已丢弃 {n_dropped_empty}/{n_before_drop} 条空 mcelog 窗口负样本"
+                f"（drop_empty_mcelog_windows=true；正样本空窗保留 {n_empty_kept_positive} 条）。",
+                flush=True,
+            )
+    elif not drop_empty and n_empty_grids > 0:
+        print(
+            "提示：drop_empty_mcelog_windows=false，空窗样本仍保留（X 对应 mcelog 通道为全零）。",
             flush=True,
         )
 
@@ -785,6 +877,10 @@ def materialize_dataset(
         "preprocess_events_finalize_parallel": bool(events_finalize_parallel),
         "preprocess_grid_fill_parallel": grid_fill_parallel_done,
         "n_empty_grids": int(n_empty_grids),
+        "n_empty_grids_dropped": int(n_dropped_empty),
+        "n_empty_grids_kept_positive": int(n_empty_kept_positive),
+        "n_samples_before_drop": int(n_before_drop),
+        "drop_empty_mcelog_windows": bool(drop_empty),
         "index_features_path": str(Path(data_cfg["index_features_path"]).resolve()),
         "time_axis": "relative_seconds_since_global_min",
         "time_epoch_offset_absolute": float(time_epoch_offset),

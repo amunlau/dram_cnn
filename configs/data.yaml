@@ -4,11 +4,15 @@ tickets_path: data/raw/trouble_tickets.csv
 inventory_path: data/raw/inventory.csv
 
 # ---------------------------------------------------------------------------
-# 预测目标（默认：未来 5 分钟内是否发生工单级故障）
+# 时间轴与窗口（全链路须一致，详见 docs/data_processing_guide.md §4）
 # ---------------------------------------------------------------------------
-# 特征窗口 [predict_time - window_seconds, predict_time)：默认与预测步长一致（5 分钟）。
+# 相对秒：t₀ = min(mcelog.error_time, tickets.failed_time[, 遗留 index])；predict_ts = t_abs − t₀
+# 特征窗（半开）：[predict_ts − window_seconds, predict_ts) — 仅用锚点之前的 mcelog
+# 标签窗（闭）：  [predict_ts, predict_ts + label_horizon_seconds] — 对齐 tickets.failed_time
+# 合法锚点（每 sid）：t_min + window_seconds ≤ predict_ts ≤ t_max − label_horizon_seconds
+# 存储：predict_time = 1970-01-01 + predict_ts 的 ISO 字符串；sidecar 含 time_axis / W / H
 window_seconds: 300
-# 标签窗口 [predict_time, predict_time + label_horizon_seconds]（闭区间）。
+# 标签窗口 [predict_ts, predict_ts + label_horizon_seconds]（闭区间）。
 # 时间轴：preprocess/build_index 将全局最早 raw 时间平移为 t=0（相对秒）；manifest 记录 time_epoch_offset_absolute。
 # 字段别名 label_backtrace_seconds；二者同时存在时以 label_horizon_seconds 为准。
 label_horizon_seconds: 300
@@ -30,7 +34,11 @@ index_features_path: data/index_stubs/features_5m_index_demo.csv
 # ---------------------------------------------------------------------------
 index_build:
   sample_interval_seconds: 300
+  # 正样本 label 窗口 [ft−H, ft] 内步长（秒）；H=300 时 60s → 每故障约 5 个正锚点（旧版统一步长 300s 时仅 ~1 个）
+  positive_sample_interval_seconds: 60
+  # 近故障 hard-neg 区：从 ft−prefault 到 ft−H；全量 preset 覆盖为 24h
   positive_prefault_seconds: 3600
+  # 基值 0.25；smoke preset 覆盖 0.08、full preset 覆盖 0.15（bash build_index.sh smoke 实际用 preset）
   target_positive_ratio: 0.25
   neg_stride_multiplier: 1
   neg_sample_strategy: uniform
@@ -44,17 +52,31 @@ index_build_presets:
     mcelog_scan_rows: 800000
     smoke_max_sids: 80
     max_rows: 500
-    max_positive_candidates: 120
+    positive_sample_interval_seconds: 60
+    positive_prefault_seconds: 3600
+    target_positive_ratio: 0.08
+    min_positives: 5
     neg_sample_strategy: random
-    min_positives: 1
-    min_total_rows: 10
+    min_total_rows: 50
   full:
     mcelog_scan_rows: null
     smoke_max_sids: null
     max_rows: null
+    positive_sample_interval_seconds: 60
+    positive_prefault_seconds: 86400
+    target_positive_ratio: 0.15
     neg_sample_strategy: uniform
-    min_neg_per_ticket_sid: 2
-    max_neg_grid_points_per_sid: 256
+    min_neg_per_ticket_sid: 3
+    max_neg_grid_points_per_sid: 512
+    min_positives: 50
+    min_total_rows: 500
+
+# 预处理：丢弃 mcelog 窗口无事件的样本（避免全零 X 进入训练）
+drop_empty_mcelog_windows: true
+# 切分后归一化：robust=median/IQR（默认，对 log1p 后时间漂移更稳）；zscore=mean/std
+normalization_method: robust
+# 归一化后 clip 到 [-clip, clip]；null 表示不裁剪
+normalization_clip: 20.0
 
 processed_dir: data/processed
 splits_dir: data/splits
@@ -81,8 +103,9 @@ mcelog_chunk_rows: 1000000
 max_index_rows: null
 mcelog_max_rows: null
 
-split_strategy: time
+split_strategy: time_stratified
 time_split:
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
+  min_pos_per_split: 1

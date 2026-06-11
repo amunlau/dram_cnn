@@ -14,9 +14,18 @@ overrides:
     index_features_path: data/raw/features_index_h300s_step300s_full.csv
     max_index_rows: null
     mcelog_max_rows: null
+    split_strategy: time_stratified
+    drop_empty_mcelog_windows: true
+    normalization_method: robust
+    time_split:
+      min_pos_per_split: 1
     # 高核数 Linux 服务器：提高预处理 fork 进程预算（112 逻辑核 × 0.85 ≈ 95 worker）
     preprocess_parallel_frac: 0.85
   train:
+    imbalance:
+      positive_oversample_factor: 2
+      positive_weight_cap: 50.0
+      focal_gamma: 0.5
     # GPU 训练时 DataLoader 预取（dataset 按样本 copy，适合多 worker）
     num_workers: 8
     prefetch_factor: 4

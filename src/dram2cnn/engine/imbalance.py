@@ -31,6 +31,23 @@ from typing import Any
 import numpy as np
 import torch
 
+# 与 configs/train.yaml 默认一致；实验 yaml 未覆盖 imbalance 子键时作 fallback。
+DEFAULT_POSITIVE_OVERSAMPLE_FACTOR = 2
+DEFAULT_POSITIVE_WEIGHT_CAP = 50.0
+DEFAULT_FOCAL_GAMMA = 0.5
+
+
+def positive_oversample_factor_from_cfg(imb_cfg: dict[str, Any]) -> int:
+    """解析 ``train.imbalance.positive_oversample_factor``（≥1；None 视为 1）。"""
+    raw = imb_cfg.get("positive_oversample_factor", DEFAULT_POSITIVE_OVERSAMPLE_FACTOR)
+    return int(raw) if raw is not None else 1
+
+
+def focal_gamma_from_cfg(imb_cfg: dict[str, Any]) -> float:
+    """解析 ``train.imbalance.focal_gamma``（0 / null 表示普通加权 CE）。"""
+    raw = imb_cfg.get("focal_gamma", DEFAULT_FOCAL_GAMMA)
+    return 0.0 if raw is None else float(raw)
+
 
 def build_positive_oversample_index_map(y_np: np.ndarray, factor: int) -> np.ndarray:
     """构造训练用索引序列：在全体样本各出现一次的基础上，将每个正样本索引再重复 ``factor-1`` 次。
@@ -64,7 +81,7 @@ def compute_class_weights_tensor(y_np: np.ndarray, imb_cfg: dict[str, Any]) -> t
         ``train.imbalance`` 字典；关键键：
 
         - ``weight_scheme``: ``inverse_freq`` | ``sqrt`` — 由 ``neg/pos`` 推导 ``w_pos`` 的主模式；
-        - ``positive_weight_cap``: 对 ``w_pos`` 的上限；``null`` 表示不裁剪（慎用，易不稳定）。默认 **200.0**（与 ``configs/train.yaml`` 一致）。
+        - ``positive_weight_cap``: 对 ``w_pos`` 的上限；``null`` 表示不裁剪（慎用，易不稳定）。默认 **50.0**（与 ``configs/train.yaml`` 一致）。
     """
     y_flat = np.asarray(y_np).reshape(-1)
     pos = float((y_flat == 1).sum())
@@ -77,7 +94,7 @@ def compute_class_weights_tensor(y_np: np.ndarray, imb_cfg: dict[str, Any]) -> t
 
     ratio = neg / pos
     scheme = str(imb_cfg.get("weight_scheme", "inverse_freq")).lower().strip()
-    cap_raw = imb_cfg.get("positive_weight_cap", 200.0)
+    cap_raw = imb_cfg.get("positive_weight_cap", DEFAULT_POSITIVE_WEIGHT_CAP)
     cap = float(cap_raw) if cap_raw is not None else None
 
     if scheme == "inverse_freq":

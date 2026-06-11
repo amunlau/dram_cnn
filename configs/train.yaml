@@ -18,15 +18,15 @@ early_stop_metric: avg_precision
 imbalance:
   # class weight=[1, w_pos] 传入 classification_loss（加权 CE / 可选 Focal）
   use_class_weight: true
-  # inverse_freq: w_pos = min(neg/pos, cap)；极端不平衡时建议配合足够大的 cap（如 400～600）以增强正类梯度。
-  # sqrt: w_pos = min(sqrt(neg/pos), cap)；更温和。
+  # inverse_freq: w_pos = min(neg/pos, cap)；极端不平衡时 cap 默认 50（勿与过高 oversample 叠加）。
+  # sqrt: w_pos = min(sqrt(neg/pos), cap)；更温和（exp_baseline 使用）。
   weight_scheme: inverse_freq
-  # 与 positive_oversample_factor 联用时不宜过高，避免损失梯度双重放大；可 150～300。
-  positive_weight_cap: 200.0
-  # 配合过采样时常用 1.0；0 或 null 即普通加权 CE。
-  focal_gamma: 1.0
-  # 训练集内每个正样本在索引序列中出现次数（≥1）。>1 时额外追加 (factor-1) 份正样本索引，DDP 与 DistributedSampler 可用；权重仍按原始 y_train 计数。
-  positive_oversample_factor: 8
+  # 与 positive_oversample_factor 联用时不宜过高，避免损失梯度双重放大。
+  positive_weight_cap: 50.0
+  # 配合过采样时常用 0.5～1.0；0 即普通加权 CE。
+  focal_gamma: 0.5
+  # 训练集内每个正样本在索引序列中出现次数（≥1）。数据修复后建议 2～3，勿与过高 class weight 叠加。
+  positive_oversample_factor: 2
   # 单机训练时可选：WeightedRandomSampler；DDP 下忽略（见 trainer 日志）。与过采样叠加时一般可保持 false。
   use_weighted_sampler: false
   # 正样本在采样权重上再乘的系数（≥1 更偏向正类）。

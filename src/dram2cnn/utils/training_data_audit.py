@@ -93,13 +93,15 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             man2 = json.loads(man_p.read_text(encoding="utf-8"))
             n_s = int(man2.get("n_samples") or 0)
             n_em = int(man2.get("n_empty_grids") or 0)
-            if n_s > 0 and n_em / n_s >= 0.5:
+            n_drop = int(man2.get("n_empty_grids_dropped") or 0)
+            denom = max(n_s + n_drop, 1)
+            if n_em / denom >= 0.5:
                 logger.warning(
-                    "preprocess_manifest: n_empty_grids=%d/%d（%.1f%% 样本 mcelog 窗口无事件，X 行为全零）；"
-                    "冒烟 mcelog 截断下常见；全量训练请取消 mcelog_max_rows 并确认 index 与 raw 对齐。",
+                    "preprocess_manifest: n_empty_grids=%d，已丢弃负样本空窗 %d（保留正样本空窗 %d）；"
+                    "冒烟 mcelog 截断下常见；全量请取消 mcelog_max_rows。",
                     n_em,
-                    n_s,
-                    100.0 * n_em / n_s,
+                    n_drop,
+                    int(man2.get("n_empty_grids_kept_positive") or 0),
                 )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass

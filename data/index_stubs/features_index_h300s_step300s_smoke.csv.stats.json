@@ -5,11 +5,13 @@
   "n_sids_in_mcelog": 1480,
   "n_ticket_sids": 2102,
   "n_ticket_sids_without_mcelog": 1942,
-  "ticket_sid_coverage_in_pos": 0.0004757373929590866,
-  "n_neg_sids": 132,
+  "ticket_sid_coverage_in_pos": 0.01807802093244529,
+  "n_neg_sids": 131,
   "n_tickets_used": 2102,
-  "positive_candidates": 2,
-  "negative_candidates_before_balance": 498,
+  "n_raw_prefault_candidates": 2198,
+  "n_near_neg_labeled": 1322,
+  "positive_candidates": 43,
+  "negative_candidates_before_balance": 494,
   "n_rows_output": 500,
   "neg_sample_strategy": "random",
   "config": {
@@ -19,12 +21,13 @@
     "label_horizon_seconds": 300.0,
     "window_seconds": 300.0,
     "positive_prefault_seconds": 3600.0,
+    "positive_sample_interval_seconds": 60.0,
     "failure_types": [
       1,
       2,
       3
     ],
-    "target_positive_ratio": 0.25,
+    "target_positive_ratio": 0.08,
     "neg_stride_multiplier": 1,
     "neg_sample_strategy": "random",
     "max_neg_grid_points_per_sid": 128,
@@ -34,15 +37,26 @@
     "smoke_max_sids": 80,
     "mcelog_scan_rows": 800000,
     "mcelog_chunk_rows": 1000000,
-    "min_positives": 1,
-    "min_total_rows": 10,
-    "max_positive_candidates": 120
+    "min_positives": 5,
+    "min_total_rows": 50,
+    "max_positive_candidates": null,
+    "mcelog_error_type_filter": [
+      1,
+      2
+    ],
+    "grid_representation": "spatial_heatmap"
   },
-  "path": "/root/workspace/data/index_stubs/features_index_h300s_step300s_smoke.csv",
+  "path": "/root/workspace/data/index_stubs/features_5m_index_demo.csv",
   "n_rows": 500,
-  "n_pos": 2,
-  "n_neg": 498,
-  "pos_rate": 0.004,
+  "n_pos": 43,
+  "n_neg": 457,
+  "pos_rate": 0.086,
   "label_horizon_seconds": 300.0,
-  "sample_interval_seconds": 300.0
+  "window_seconds": 300.0,
+  "sample_interval_seconds": 300.0,
+  "mcelog_error_type_filter": [
+    1,
+    2
+  ],
+  "grid_representation": "spatial_heatmap"
 }

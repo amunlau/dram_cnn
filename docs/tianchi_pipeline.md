@@ -6,12 +6,12 @@
 
 - **时间戳**：raw CSV 经 `time_axis` 平移为 **相对秒**（全局最早 raw 时刻 = 0）；`predict_ts` 与 mcelog 事件轴一致。`preprocess_manifest.json` 含 `time_epoch_offset_absolute`。
 - **索引表**（`data.index_features_path`）：每行一条样本，至少含 `sid`, `predict_time`（**1970-01-01 起算 ISO**，读回数值即相对秒）。重建：**`bash scripts/build_index.sh smoke`**。
-- **特征窗口**：`[predict_time - window_seconds, predict_time)`。默认 **5 分钟**（`window_seconds=300`），与索引 **`sample_interval_seconds`** 一致（相对 300s 网格，非墙钟整 5 分钟，见 `data_processing_guide.md` §3.5.1）。
+- **特征窗口**（半开）：`[predict_ts − window_seconds, predict_ts)`。默认 **W=300**；Horizon 实验 **W=H**（1800/3600），负样本步长见 sidecar `sample_interval_seconds`（可与 W 不同）。
 - **网格表示**（`data.grid_representation`）：
   - **`spatial_heatmap`（默认）**：按 `row_bin_size`×`col_bin_size`（默认 **1024×32**）将逻辑 row/col 映射到 **H×W=128×32**（对应物理地址范围 131072×1024）；**bankid（0–15）** 作为 **16 个通道**在 bin 上累积计数，再对各通道 `log1p`。默认仅统计 **Read/Scrub CE**（`mcelog_error_type_filter: [1,2]`）。若 `inventory_as_grid_channels: true`，将 inventory **one-hot**（15 维）按通道复制为 **15×H×W**，与 16 个 bank 通道拼接，得到 **`in_channels=31`**，此时 **不写** `tabular.npy`，`model.tabular_dim=0`。若 `inventory_as_grid_channels: false`，则 **`in_channels=16`**，inventory 仍写入 `tabular.npy` 并在池化后与网格融合（`tabular_dim=15`）。
   - **`legacy_rc_et`**（调试）：对每个窗口内事件，将 **原始 row/col** 当作网格下标，`error_type==1/2/0` 分别计入 3 个通道；坐标裁剪由 `grid_max_row/col` 与 `model.grid_height/width` 限制。
 - **inventory**：编码定义不变（`inventory_encode`）。在 spatial 且 `inventory_as_grid_channels` 时特征已进入 **X**；否则写入 `tabular.npy` 并在切分后按训练集标准化，再由 **GridCNN-Deep** 融合。
-- **变换**：网格逐 cell `log1p` 后堆成 `[C,H,W]`，再经切分阶段按训练集 **逐 (C,H,W) 位置** 标准化（见 `splitter.normalize_split_features_by_train`）。
+- **变换**：网格逐 cell `log1p` 后堆成 `[C,H,W]`；切分阶段按训练集 **robust（median/IQR，IQR≈0 时回退 MAD/std）** 或 **zscore** 标准化，并可选 **clip 到 ±normalization_clip**（默认 20）。见 `splitter.normalize_split_features_by_train`。
 - **正样本规则**（对齐天池工单）：对配置的 `label_failure_types`，若存在同一 `sid` 的工单满足  
   `predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds`（字段别名 `label_backtrace_seconds`），则 `y=1`，否则 `0`。
 
@@ -25,9 +25,11 @@
 | `inventory_as_grid_channels` | spatial 下是否把 inventory 拼入 **X** 的通道维 |
 | `mcelog_error_type_filter` | spatial 下计入 CE 的 `error_type` 列表（默认 `[1,2]`） |
 | `index_features_path` | 索引 CSV |
-| `window_seconds` | 特征窗（秒）；默认 **300**（5 分钟） |
-| `label_horizon_seconds` | 预测 horizon（秒）；默认 **300**（未来 5 分钟是否故障） |
-| `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（字段别名） |
+| `window_seconds` | 特征窗 W（秒）；半开窗 `[predict_ts−W, predict_ts)`；默认 **300** |
+| `label_horizon_seconds` | 预测 horizon H（秒）；闭区间标签窗 `[predict_ts, predict_ts+H]` |
+| `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（别名；配置加载时双向同步） |
+| `split_strategy` / `time_split` | 切分策略（默认 **`time_stratified`**）与 `min_pos_per_split` |
+| `normalization_clip` | 归一化后 clip 到 ±值（默认 20；null 不裁剪） |
 | `index_build` / `index_build_presets` | `scripts/build_index.py` 采样与平衡参数 |
 | `label_failure_types` | 工单类型列表，如 `[1,2,3]` |
 | `grid_max_row/col` | **legacy** 模式下 row/col 裁剪上限；spatial 下可忽略 |

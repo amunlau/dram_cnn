@@ -119,7 +119,8 @@
 - `mcelog_path`、`tickets_path`、`index_features_path` 文件存在。  
 - `inventory_path` 若为非空，文件必须存在；若为 `null`/省略，表示无 inventory（实现上 one-hot 全零，视模式而定）。  
 - `window_seconds > 0`。  
-- `split_strategy` 属于 `time` 或 `sid`。  
+- `split_strategy` 属于 `time`、`time_stratified` 或 `sid`。
+- `normalization_method` 属于 `robust` 或 `zscore`。  
 - `infer.mode` 必须为 `full`（与本仓库单头分类实现绑定）。  
 - `model.tabular_dim` 若大于 0，必须等于 `TABULAR_DIM`（当前为 **15**，与 `inventory_encode` 中类别集合一致）。
 - **`spatial_heatmap`**：`model.in_channels` 须等于 `num_bank_channels + (15 if inventory_as_grid_channels else 0)`；`inventory_as_grid_channels=true` 时 `tabular_dim` 须为 **0**，为 `false` 时 `tabular_dim` 须为 **15**。
@@ -223,7 +224,7 @@
 
 枚举：`spatial_heatmap`（默认，对齐天池 132973 报告推荐的空间分箱 + bank 通道）与 `legacy_rc_et`（原始 row/col + error_type 三通道，用于小网格调试）。
 
-**配置原因**：两种表示下 `X` 的 `C/H/W` 完全不同。`exp_baseline` 在 overrides 里指定 `data.grid_representation: spatial_heatmap`，**模型维度**继承 `configs/model.yaml`（31×128×32）；切换 `grid_representation` 时须同步 `model.in_channels` / `grid_height` / `grid_width` 并重跑 preprocess。
+**配置原因**：两种表示下 `X` 的 `C/H/W` 完全不同。`exp_baseline` 使用 **`configs/model_smoke.yaml`**（与 `model.yaml` 同 C/H/W=31×128×32，但 backbone 更浅、参数量约 1/4）；`exp_full_best_ddp` / `exp_optuna_smoke` 使用完整 **`configs/model.yaml`**。切换 `grid_representation` 时须同步 `model.in_channels` / `grid_height` / `grid_width` 并重跑 preprocess。
 
 **方法**：默认实验应使用 `spatial_heatmap`；切换 `grid_representation` 时**必须**重跑 preprocess 并同步 `model.yaml` 或实验 overrides 中的张量维。
 
@@ -246,20 +247,23 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ### 5.7 `window_seconds` 与 `label_horizon_seconds`
 
-- **特征窗口** `[predict_ts - window_seconds, predict_ts)`：默认 **300 秒（5 分钟）**，与索引采样步长一致。  
-- **标签窗口** `[predict_ts, predict_ts + label_horizon_seconds]`：默认 **300 秒**（预测未来 5 分钟内是否故障）。字段 **`label_backtrace_seconds`** 与之同义。
+- **特征窗口** `[predict_ts - window_seconds, predict_ts)`（**半开**）：默认 **300 秒**；Horizon 实验常令 **W=H**（如 1800/3600），与负样本索引步长 **`sample_interval_seconds`** 可不同。
+- **标签窗口** `[predict_ts, predict_ts + label_horizon_seconds]`（**闭**）：默认 **300 秒**。字段 **`label_backtrace_seconds`** 与之同义。
 
-`exp_baseline` / `exp_optuna_smoke` 在 spatial + 5 分钟设定下用于冒烟；`exp_horizon_30m` / `exp_horizon_1h` 默认使用 `data/index_stubs/` 下 horizon 冒烟索引（`build_horizon_indexes.sh smoke`）；全量对比需 `build_horizon_indexes.sh full` 并改 `index_features_path`。
+`exp_baseline` 使用 **`model_smoke.yaml`**（轻量 GridCNN，形状同 31×128×32）；`exp_optuna_smoke` / `exp_full_best_ddp` 使用完整 **`model.yaml`**。Horizon 实验 `exp_horizon_30m` / `exp_horizon_1h` 默认使用 `data/index_stubs/` 下 horizon 冒烟索引（`build_horizon_indexes.sh smoke`）；全量对比需 `build_horizon_indexes.sh full` 并改 `index_features_path`。
 
 ### 5.7b 索引生成（`index_build` / `scripts/build_index.py`）
 
 | 字段 | 含义 |
 |------|------|
-| `sample_interval_seconds` | 预测锚点步长（秒） |
-| `positive_prefault_seconds` | 工单前密集采样宽度（默认 1h） |
-| `target_positive_ratio` | 目标正样本比例（默认 0.25） |
+| `sample_interval_seconds` | 负样本 / 近故障区锚点步长（秒） |
+| `positive_sample_interval_seconds` | 正样本 label 窗口 `[ft−H, ft]` 内步长（默认 60；H=300 时约 5 点/故障） |
+| `positive_prefault_seconds` | 近故障 hard-neg 区宽度（默认 1h；full preset 24h） |
+| `target_positive_ratio` | 目标正样本比例（基值 0.25；**smoke preset 0.08**、**full preset 0.15**） |
 | `neg_sample_strategy` | `uniform`（全量，正常时段均匀采样）或 `random`（冒烟） |
 | `min_neg_per_ticket_sid` | 每个工单 sid 至少采样的负样本数 |
+| `min_positives` / `min_total_rows` | 写入前校验（smoke preset 默认 5 / 50；full 默认 50 / 500） |
+| `max_positive_candidates` | 可选正样本行数上限；为 `null` 且设 `max_rows` 时自动取 `max_rows×ratio/(1−ratio)`（smoke 约 43/500） |
 
 **`window_seconds` / `label_horizon_seconds`** 在 **`index_build` 段不重复配置**，由 `data.yaml` 顶层字段（或 CLI `--label-horizon-seconds` / `--window-seconds`）决定，避免与 preprocess 不一致。
 
@@ -294,10 +298,11 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ### 5.13 `split_strategy` 与 `time_split`
 
+- `time_stratified`（**默认**）：分层时间切分，保证各 split 至少 `min_pos_per_split` 个正例。  
 - `time`：按 `predict_ts` 排序后按比例切 train/val/test。  
-- `sid`：按唯一 `sid` 分层切分（实现上约 **64% / 16% / 20%** train/val/test），避免同一 `sid` 泄漏到多个 split。
+- `sid`：按唯一 `sid` 分层切分（约 **64% / 16% / 20%** train/val/test）。
 
-`time_split` 下三个比例默认 `0.7/0.15/0.15`，和为 1。若改为极端比例（如 val 只有几条），验证集 AUC/PR 会极不稳定，早停行为也会异常——这不是代码 bug，而是**估计量方差**问题；`training_data_audit` 会在训练日志中 warn。
+`time_split` 下三个比例默认 `0.7/0.15/0.15`，和为 1；`min_pos_per_split` 默认 1。**`exp_baseline` 冒烟实验覆盖为 `0.6/0.2/0.2`**（略增大 val/test 以便早停与指标更稳）；`exp_horizon_*` / `exp_full_best_ddp` 继承 data.yaml 默认 0.7/0.15/0.15。`normalization_method` 默认 `robust`；`normalization_clip` 默认 **20**（null 不裁剪）；`drop_empty_mcelog_windows` 默认 true（仅丢弃负样本空窗）。
 
 ---
 
@@ -363,8 +368,8 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 - `use_class_weight`：是否在损失里使用类别权重。  
 - `weight_scheme`：`inverse_freq` 或 `sqrt` 等，决定正类权重如何从 `neg/pos` 推导，并受 `positive_weight_cap` 限制。  
-- `focal_gamma`：默认 **`1.0`**（启用 Focal 调制）；设为 `0` 或 `null` 时退回普通加权 CE。  
-- `positive_oversample_factor`：将每个正样本索引重复扩展，**放大** `train_virtual_len`；与 DDP 的 `DistributedSampler` 兼容。  
+- `focal_gamma`：默认 **`0.5`**；设为 `0` 或 `null` 时退回普通加权 CE。  
+- `positive_oversample_factor`：默认 **2**（`exp_baseline` 覆盖为 **1**）；将每个正样本索引重复扩展，**放大** `train_virtual_len`。  
 - `use_weighted_sampler`：单机可选；DDP 下通常关闭（见 trainer 日志说明）。  
 - `sampler_positive_boost`：若启用加权采样器时的额外正类倾向。
 
@@ -402,7 +407,8 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 | `run_name` | `exp_tianchi_baseline` | `exp_tianchi_full_best_ddp` |
 | 索引/mcelog 截断 | `max_index_rows=500`，`mcelog_max_rows=800000`（须与 `index_build_presets.smoke.mcelog_scan_rows` 一致） | 二者 `null`（不截断） |
 | 网格 / horizon | 继承 `data.yaml`：**spatial_heatmap** + **5min** 窗/标签 | 同左 |
-| 模型张量 | 继承默认 **`31×128×32`**，`tabular_dim=0` | 同左 |
+| 模型片段 | **`model_smoke.yaml`**（轻量 GridCNN） | **`model.yaml`**（完整 GridCNN-Deep） |
+| 模型张量 | **`31×128×32`**，`tabular_dim=0` | 同左 |
 | 训练预算 | `epochs=20`，`patience=6`；train/infer **关闭 DDP 与 auto_batch** | `epochs=300`，`num_workers=8`；**gpu/ddp 继承 base（auto 多卡 + 80% 显存）** |
 | 典型用途 | 冒烟、CI、`autotune.sh` | 取消截断后的全量 preprocess/train；**须** `build_index --mode full` 并改 `index_features_path` |
 
@@ -465,7 +471,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 **base**：`versioned_runs=true`，`device=auto`，`run_id` 与各 `*_run_id` 为 `null`。  
 **data**：spatial 默认 **`window_seconds=label_horizon_seconds=300`（5 分钟）**；`max_index_rows`/`mcelog_max_rows` 默认 `null`；索引由 `scripts/build_index.py` 生成，演示表见 `index_stubs/`。  
 **model**：`31×128×32`，`tabular_dim=0`；GridCNN-Deep 默认 `stem_channels=64`，`backbone_channels=[64,128,256,256]`，`blocks_per_stage=2`，`use_residual=true`。  
-**train**：`batch_size=256`，`epochs=300`，`patience=50`，`num_workers=0`，`focal_gamma=1.0`，`positive_weight_cap=200`，`early_stop_metric=avg_precision`，`imbalance.positive_oversample_factor=8`；**gpu/ddp** 默认见 `base.yaml`（`exp_baseline`、`exp_horizon_*` 等冒烟 overrides 关闭 DDP；`exp_optuna_smoke` / `exp_full_best_ddp` 继承 base 多卡默认）。  
+**train**：`batch_size=256`，`epochs=300`，`patience=50`，`num_workers=0`，`focal_gamma=0.5`，`positive_weight_cap=50`，`early_stop_metric=avg_precision`，`imbalance.positive_oversample_factor=2`；**gpu/ddp** 默认见 `base.yaml`（`exp_baseline` 用轻量 `model_smoke.yaml` 且过采样=1；`exp_full_best_ddp` 继承 base 多卡默认）。  
 **infer**：`batch_size=512`，`mode=full`。
 
 ---
@@ -544,13 +550,17 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ---
 
-## 第十五章 深入：`split_strategy=time` 与 `sid` 的业务含义
+## 第十五章 深入：`split_strategy` 的业务含义
 
-### 15.1 时间切分（默认）
+### 15.1 分层时间切分（默认 `time_stratified`）
 
-按 `predict_ts` 排序后按比例切开，模拟「用过去预测未来」：训练段对应较早的预测锚点，测试段对应较晚锚点。**前提假设**：数据生成过程在时间上近似平稳，且没有「全局漂移」导致晚期标签定义变化。若赛题存在明显活动周期（例如促销季故障模式突变），时间切分仍合法，但外推误差会上升——这属于**问题设定**而非配置 bug。
+负样本按 `predict_ts` 排序后依次填入 train → val → test；正样本按时间排序后保证每档至少 `min_pos_per_split` 个，再按剩余比例分配。兼顾「大致时间先后」与「验证集可计算 AUC/PR」。全量索引正样本仍不足 `3×min_pos_per_split` 时会报错，需重建索引或改用 `sid`。
 
-### 15.2 按服务器切分
+### 15.2 纯时间切分（`time`）
+
+按 `predict_ts` 排序后按比例切开，不做标签分层；正例极少时 train/val 可能无正样本。
+
+### 15.3 按服务器切分（`sid`）
 
 当同一 `sid` 的样本在时间上强相关、且你不希望「同一机器同时出现在 train 与 test」时，`sid` 切分更保守，通常使测试分数**低于**时间切分（更难）。选择哪种应在实验记录中写明，以便与论文或答辩材料对齐。
 

@@ -111,16 +111,28 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     if horizon <= 0:
         raise ValueError("data.label_horizon_seconds (或 label_backtrace_seconds) must be > 0")
 
-    split_strategy = data_cfg.get("split_strategy", "time")
-    if split_strategy not in {"time", "sid"}:
-        raise ValueError("Config error: `split_strategy` must be one of: time, sid")
-    if split_strategy == "time":
+    split_strategy = data_cfg.get("split_strategy", "time_stratified")
+    if split_strategy not in {"time", "time_stratified", "sid"}:
+        raise ValueError(
+            "Config error: `split_strategy` must be one of: time, time_stratified, sid"
+        )
+    norm_method = str(data_cfg.get("normalization_method", "robust")).lower().strip()
+    if norm_method not in {"zscore", "robust"}:
+        raise ValueError("Config error: data.normalization_method must be zscore or robust")
+    clip_raw = data_cfg.get("normalization_clip", 20.0)
+    if clip_raw not in (None, "null", False):
+        if float(clip_raw) <= 0:
+            raise ValueError("Config error: data.normalization_clip must be > 0 or null")
+    if split_strategy in {"time", "time_stratified"}:
         ts = data_cfg.get("time_split") or {}
         tr = float(ts.get("train_ratio", 0.7))
         vr = float(ts.get("val_ratio", 0.15))
         te = float(ts.get("test_ratio", 0.15))
         if round(tr + vr + te, 5) != 1.0:
             raise ValueError("Config error: data.time_split train/val/test ratios must sum to 1.0")
+        min_pos = int(ts.get("min_pos_per_split", 1))
+        if min_pos < 0:
+            raise ValueError("Config error: data.time_split.min_pos_per_split must be >= 0")
 
     infer_mode = cfg.get("infer", {}).get("mode", "full")
     if infer_mode != "full":

@@ -8,7 +8,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from dram2cnn.data.splitter import split_by_sid, split_by_time
+from dram2cnn.data.splitter import split_by_sid, split_by_time, split_by_time_stratified
 from dram2cnn.data.tianchi_build import materialize_dataset
 from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_experiment_config
@@ -39,15 +39,22 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
         seed=int(cfg["base"].get("seed", 42)),
     )
     # 阶段二：splitter 读 processed，写出 X_train 等并 normalize_split_features_by_train
-    split_strategy = cfg["data"].get("split_strategy", "time")
+    split_strategy = cfg["data"].get("split_strategy", "time_stratified")
+    norm_method = cfg["data"].get("normalization_method", "robust")
+    norm_clip = cfg["data"].get("normalization_clip", 20.0)
+    if norm_clip in (None, "null", False):
+        norm_clip_val = None
+    else:
+        norm_clip_val = float(norm_clip)
+    split_kw = dict(normalization_method=norm_method, normalization_clip=norm_clip_val)
     if split_strategy == "sid":
         split_by_sid(
             cfg["data"]["processed_dir"],
             cfg["data"]["splits_dir"],
             random_state=int(cfg["base"].get("seed", 42)),
+            **split_kw,
         )
-    else:
-        # 默认 time：按 predict_ts 排序后按比例切段，减轻时间泄漏
+    elif split_strategy == "time":
         ts = cfg["data"].get("time_split", {})
         split_by_time(
             cfg["data"]["processed_dir"],
@@ -55,6 +62,18 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
             float(ts.get("train_ratio", 0.7)),
             float(ts.get("val_ratio", 0.15)),
             float(ts.get("test_ratio", 0.15)),
+            **split_kw,
+        )
+    else:
+        ts = cfg["data"].get("time_split", {})
+        split_by_time_stratified(
+            cfg["data"]["processed_dir"],
+            cfg["data"]["splits_dir"],
+            float(ts.get("train_ratio", 0.7)),
+            float(ts.get("val_ratio", 0.15)),
+            float(ts.get("test_ratio", 0.15)),
+            min_pos_per_split=int(ts.get("min_pos_per_split", 1)),
+            **split_kw,
         )
     print("Preprocess + split completed.", manifest.get("grid_shape"), flush=True)
 

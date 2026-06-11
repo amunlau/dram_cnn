@@ -30,6 +30,8 @@ from dram2cnn.engine.imbalance import (
     build_positive_oversample_index_map,
     compute_class_weights_tensor,
     compute_per_sample_weights,
+    focal_gamma_from_cfg,
+    positive_oversample_factor_from_cfg,
 )
 from dram2cnn.engine.metrics import classification_metrics, search_best_threshold
 from dram2cnn.models.factory import build_model
@@ -212,8 +214,7 @@ def train_model(
 
     imb_cfg = train_cfg.get("imbalance", {})
     y_train_np = np.load(f"{splits_dir}/y_train.npy")
-    pos_os_raw = imb_cfg.get("positive_oversample_factor", 8)
-    pos_os = int(pos_os_raw) if pos_os_raw is not None else 1
+    pos_os = positive_oversample_factor_from_cfg(imb_cfg)
     idx_map = build_positive_oversample_index_map(y_train_np, pos_os)
     if idx_map.shape[0] > len(y_train_np):
         train_ds = IndexMappedDataset(train_base, idx_map)
@@ -300,8 +301,7 @@ def train_model(
     if use_weight:
         class_w = compute_class_weights_tensor(y_train_np, imb_cfg).to(dev)
 
-    _fg = imb_cfg.get("focal_gamma", 1.0)
-    focal_gamma = 0.0 if _fg is None else float(_fg)
+    focal_gamma = focal_gamma_from_cfg(imb_cfg)
 
     if _is_main_process() and logger is not None:
         logger.info(

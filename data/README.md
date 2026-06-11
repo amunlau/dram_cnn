@@ -3,7 +3,8 @@
 - **`raw/`**：`mcelog.csv`、`trouble_tickets.csv`、`inventory.csv`；全量索引表由 `bash scripts/build_index.sh full` 写入此目录。
 - **`index_stubs/`**：冒烟用小样本索引。
   - **默认配置使用**：`features_5m_index_demo.csv`（5 分钟，`bash scripts/build_index.sh smoke`）
-  - **Horizon 对比 stub**：`features_index_h1800s_step600s_smoke.csv`、`features_index_h3600s_step1800s_smoke.csv`（由 `build_horizon_indexes.sh smoke` 生成；5 分钟条目为 `features_index_h300s_step300s_smoke.csv`，与 demo 表内容等价但文件名不同，实验 YAML 仍指向 demo 表）
+  - **Horizon 对比 stub**：`features_index_h1800s_step600s_smoke.csv`、`features_index_h3600s_step1800s_smoke.csv`（由 `build_horizon_indexes.sh smoke` 生成）
+  - **5 分钟别名**：`features_index_h300s_step300s_smoke.csv` 与 `features_5m_index_demo.csv` **内容相同**（horizon 脚本会复制 demo 表，避免重复构建）
   重建：
   ```bash
   export PYTHONPATH=src

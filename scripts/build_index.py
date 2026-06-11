@@ -53,6 +53,7 @@ def main() -> None:
     ap.add_argument("--label-horizon-seconds", type=float, default=None)
     ap.add_argument("--window-seconds", type=float, default=None)
     ap.add_argument("--positive-prefault-seconds", type=float, default=None)
+    ap.add_argument("--positive-sample-interval-seconds", type=float, default=None)
     ap.add_argument("--target-positive-ratio", type=float, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-rows", type=int, default=None)
@@ -65,6 +66,9 @@ def main() -> None:
     ib_raw.setdefault("tickets_path", data_cfg.get("tickets_path", "data/raw/trouble_tickets.csv"))
     ib_raw.setdefault("failure_types", data_cfg.get("label_failure_types", [1, 2, 3]))
     ib_raw.setdefault("mcelog_chunk_rows", int(data_cfg.get("mcelog_chunk_rows", 1_000_000)))
+    ib_raw.setdefault("grid_representation", data_cfg.get("grid_representation", "spatial_heatmap"))
+    if data_cfg.get("mcelog_error_type_filter") is not None:
+        ib_raw.setdefault("mcelog_error_type_filter", data_cfg.get("mcelog_error_type_filter"))
 
     # horizon / window 优先 CLI → 顶层 data.yaml（index_build 段不再重复 horizon，避免与顶层不一致）
     horizon = (
@@ -98,6 +102,8 @@ def main() -> None:
 
     if args.positive_prefault_seconds is not None:
         ib_raw["positive_prefault_seconds"] = args.positive_prefault_seconds
+    if args.positive_sample_interval_seconds is not None:
+        ib_raw["positive_sample_interval_seconds"] = args.positive_sample_interval_seconds
     if args.target_positive_ratio is not None:
         ib_raw["target_positive_ratio"] = args.target_positive_ratio
 
@@ -105,13 +111,7 @@ def main() -> None:
     preset = presets.get(args.mode, {})
     ib_raw.update({k: v for k, v in preset.items() if v is not None})
 
-    if args.mode == "smoke":
-        ib_raw.setdefault("mcelog_scan_rows", 800_000)
-        ib_raw.setdefault("smoke_max_sids", 80)
-        ib_raw.setdefault("max_rows", 500)
-        ib_raw.setdefault("min_positives", 1)
-        ib_raw.setdefault("min_total_rows", 10)
-    else:
+    if args.mode == "full":
         ib_raw.setdefault("mcelog_scan_rows", None)
         ib_raw.setdefault("smoke_max_sids", None)
         ib_raw.setdefault("max_rows", args.max_rows)
@@ -127,7 +127,8 @@ def main() -> None:
         out = root / out
 
     print(
-        f"Building index mode={args.mode} horizon={horizon}s interval={interval}s window={window}s → {out}",
+        f"Building index mode={args.mode} horizon={horizon}s interval={interval}s window={window}s "
+        f"pos_interval={cfg.positive_sample_interval_seconds}s → {out}",
         flush=True,
     )
     summary = build_index_to_csv(cfg, out)

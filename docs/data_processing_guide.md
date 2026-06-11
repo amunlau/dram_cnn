@@ -55,7 +55,7 @@
 
 ## 3. 端到端处理管线（鸟瞰）
 
-下列流程对应 `python3 -m dram2cnn.pipelines.run_preprocess`（源码：`src/dram2cnn/pipelines/run_preprocess.py`）：先 **物化 `processed/`**，再 **`split_by_time` 或 `split_by_sid`** 写入 `data/splits/`。
+下列流程对应 `python3 -m dram2cnn.pipelines.run_preprocess`（源码：`src/dram2cnn/pipelines/run_preprocess.py`）：先 **物化 `processed/`**（可选丢弃空 mcelog 窗负样本），再 **`split_by_time_stratified` / `split_by_time` / `split_by_sid`** 写入 `data/splits/` 并 **robust 归一化**。
 
 ```mermaid
 flowchart TB
@@ -79,7 +79,7 @@ flowchart TB
     MAN[preprocess_manifest.json]
   end
   subgraph split [切分与标准化]
-    SP[train/val/test]
+    SP["train/val/test（默认 time_stratified）"]
     NS[normalization_stats.json]
   end
   IDX --> L
@@ -98,7 +98,7 @@ flowchart TB
   SP --> NS
 ```
 
-默认配置将 `window_seconds` 与 **`label_horizon_seconds`** 均设为 **300 秒（5 分钟）**：特征窗与预测目标对齐，索引按 **`sample_interval_seconds=300`** 固定步长采样（见 §3.5.1，**非**墙钟整 5 分钟对齐）。对比实验可改为 1800s、3600s 等，并配合 `scripts/build_index.py` 生成对应索引表。
+默认配置 **`window_seconds = label_horizon_seconds = 300`（5 分钟）**，特征窗长度与预测 horizon 一致；负样本索引步长 **`sample_interval_seconds=300`**（正样本区另用 **`positive_sample_interval_seconds=60`**，见 §3.5）。Horizon 对比实验（30m/1h）须 **W=H=1800/3600** 且 **重建索引 sidecar**（`label_horizon_seconds` / `window_seconds` 与 YAML 一致）。
 
 ---
 
@@ -108,20 +108,21 @@ flowchart TB
 
 | 原则 | 实现 |
 |------|------|
-| 固定步长采样 | `sample_interval_seconds`（默认 300） |
-| 正样本增强 | 工单前 `positive_prefault_seconds`（默认 1h）内每步长一个点；打标后保留 **y=1** |
-| 近故障负样本 | prefault 内 **y=0** 的点在负采样不足时**补齐**负类池 |
-| 负样本平衡 | 全量 `uniform` 均匀采样；冒烟 `random`；目标 `target_positive_ratio=0.25`（真实正样本稀少时实际 pos_rate 可能更低，由 mcelog 覆盖决定） |
+| 固定步长采样 | 负样本 / 近故障区：`sample_interval_seconds`（默认 300） |
+| 正样本区采样 | 工单失败**之前** **H 秒**内 `[ft−H, ft]` 密集取锚点；**打标**看锚点**之后**闭区间 `[predict_ts, predict_ts+H]` 是否含工单 |
+| 近故障负样本 | `[ft−prefault, ft−H)` 内按 `sample_interval_seconds` 取点；打标 **y=0**；负采样不足时**补齐**负类池 |
+| 负样本平衡 | 全量 `uniform` 均匀采样；冒烟 `random`；目标 `target_positive_ratio`（smoke preset **0.08**）；正样本过多时按 `max_rows×ratio/(1−ratio)` 下采样 |
 | sid 覆盖 | 负采样优先全部工单 sid，再覆盖 mcelog 其余 sid |
-| 时间范围 | 锚点 clamp 在 `[t_min+W, t_max-horizon]`；**无 mcelog 边界的工单 sid 不生成正样本** |
+| 时间范围 | **负样本 / 近故障区** clamp 在 `[t_min+W, t_max−H]`；**正样本区**在 `[ft−H, ft]`（ft 可 > t_max）；bounds 扫描与 preprocess 同 **CE 过滤**（spatial 默认 `[1,2]`）；无 mcelog 的工单 sid 跳过 |
 | 冒烟规模 | `max_rows=500` 时负样本会补满至上限；`mcelog_scan_rows` 须与实验 `mcelog_max_rows` 一致（默认 **800000**） |
 
 ### 3.5.1 `predict_time` 步长 vs 墙钟「整 5 分钟」
 
 常见做法之一是把锚点对齐到墙钟边界（如 3:05:00、3:10:00），以便模拟「每 5 分钟定时批跑推理」。**本仓库默认不采用墙钟对齐**，而采用：
 
-- **固定步长**：`sample_interval_seconds`（默认 300s），在 Unix 时间轴上等间隔取点；
-- **网格原点随 sid / 故障时刻变化**：正样本在工单失败时刻前 `positive_prefault_seconds` 内按步长密采样；负样本从该 sid 的 `t_min + window_seconds` 起按步长取点（或 random 后 snap 到相对网格）。
+- **正样本区**：每个故障时刻前 **H 秒**（`label_horizon_seconds`）内按 `positive_sample_interval_seconds`（默认 60s）取锚点；
+- **近故障区**：再向前至 `positive_prefault_seconds`（full 默认 24h）按 `sample_interval_seconds` 取 hard negative 候选；
+- **负样本全局**：从各 sid 合法时间轴均匀 / 随机采样，逼近 `target_positive_ratio`。
 
 因此索引 CSV 中 `predict_time` 的**秒分量通常不是 :00/:05/:10**，属预期行为。任务语义仍为：在锚点 `predict_ts` 用 `[predict_ts−W, predict_ts)` 的 mcelog 预测 `[predict_ts, predict_ts+H]` 内是否故障；与锚点是否墙钟对齐无关。若需与线上 cron 严格一致，可在索引构建阶段另行增加墙钟 snap（当前实现未包含）。
 
@@ -165,7 +166,21 @@ predict_ts = t_absolute − t₀    （全数据最早事件 → 0）
 - **落入窗口的事件**满足：`t_end − W ≤ error_time < t_end`（实现上用 `searchsorted` 在已排序的时间数组上取切片，复杂度接近窗口内事件条数）。
 - **不使用锚点之后的日志**，避免信息泄漏；这与「在 `predict_time` 时刻做预测」的设定一致。
 
-默认 **`window_seconds = label_horizon_seconds = 300`（5 分钟）**，特征窗与预测步长对齐；对比实验可改为 1800、3600 等并同步重建索引表。
+默认 **`window_seconds = label_horizon_seconds = 300`（5 分钟）**。Horizon 实验须同步改 W/H 并重建索引（见 §3.5 与 `build_horizon_indexes.sh`）。
+
+### 4.3 合法锚点区间（索引构建）
+
+对每个 sid，mcelog 观测时间为 `[t_min, t_max]`（相对秒）。**负样本 / 近故障区 / 均匀网格**锚点须满足：
+
+```text
+t_min + W ≤ predict_ts ≤ t_max − H
+```
+
+**正样本区**在每条工单失败时刻 **ft** 前的 `[ft−H, ft]` 密集采样；**ft 可晚于 t_max**（故障在 mcelog 观测结束之后仍可能打 y=1，特征窗或为空，由 preprocess 保留正样本空窗）。
+
+右界 **`t_max − H`** 为右删截：避免**无工单先验**的锚点其标签窗 `[predict_ts, predict_ts+H]` 超出以 mcelog 为 proxy 的数据末尾。
+
+实现见 `index_builder._valid_predict_bounds`；preprocess 会校验索引 sidecar 的 `window_seconds` / `label_horizon_seconds` 与当前 YAML 一致。
 
 ---
 
@@ -249,7 +264,7 @@ predict_ts = t_absolute − t₀    （全数据最早事件 → 0）
 | `y.npy` | `int64`，长度 `N` |
 | `tabular.npy` | 若配置写出存在，`float32`，`[N, 15]`；spatial 且 inventory 已拼入通道时常 **不存在** |
 | `meta.csv` | 样本级元数据：`sid`，`predict_time`（1970 起算展示），`label`，`predict_ts`（相对秒 ≥ 0） |
-| `preprocess_manifest.json` | **权威元数据**：`grid_shape`、`schema`、`tabular_dim`、`window_seconds`、`grid_representation`、并行是否启用、`n_empty_grids`（mcelog 窗口为空的样本数）等 |
+| `preprocess_manifest.json` | **权威元数据**：`grid_shape`、`schema`、`n_samples`、`pos_rate`、`drop_empty_mcelog_windows`、`n_empty_grids`、`n_empty_grids_dropped`、`n_empty_grids_kept_positive` 等 |
 
 **注意**：修改 **`configs/data.yaml` 或 `configs/model.yaml` 中与形状相关的项** 后，务必**清空** `processed/`、`splits/` 并重跑预处理，否则后续 `validate` 或训练会报 **C/H/W 或 tabular 维不一致**。
 
@@ -257,12 +272,11 @@ predict_ts = t_absolute − t₀    （全数据最早事件 → 0）
 
 ## 8. 切分与标准化（`data/splits/`）
 
-1. **划分策略**（`split_strategy`）：默认按索引行的 **`predict_ts` 排序后** 按时间比例切分为 train/val/test，避免未来信息泄漏到过去（随机按 `sid` 划分是另一种可选策略）。
-2. **标准化**：  
-   - 对 **`X`**：仅用 **训练集** 计算每个 **(C, h, w)** 位置的均值与标准差，再应用到 val/test（见 `splitter.normalize_split_features_by_train`）。  
-   - 对 **`tabular`**（若存在）：按 **特征维** 用训练集估计 mean/std。
+1. **划分策略**（`split_strategy`）：默认 **`time_stratified`**——按 `predict_ts` 排序后切分，并保证 train/val/test 各含至少 `min_pos_per_split` 个正例；纯时间序用 `time`，按机器隔离用 `sid`。
+2. **归一化**（`normalization_method`）：默认 **`robust`**（median / IQR，仅用 train 拟合）；可选 `zscore`。归一化后默认 **clip 到 ±`normalization_clip`**（20）。见 `splitter.normalize_split_features_by_train`。
+3. **空窗样本**（`drop_empty_mcelog_windows`，默认 true）：丢弃 **负样本** 中空 mcelog 窗行；**正样本** 即使空窗也保留（避免 rare label 因对齐丢失），manifest 记录 `n_empty_grids_dropped` / `n_empty_grids_kept_positive`。
 
-由此得到 `X_train.npy` 等及 `normalization_stats.json`。
+由此得到 `X_train.npy` 等及 `normalization_stats.json`（含 `method: robust|zscore`）。
 
 ---
 

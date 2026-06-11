@@ -12,14 +12,16 @@ from __future__ import annotations
 ## 采样策略（与 `docs/data_processing_guide.md` §3.5 一致）
 
 1. **时间步长**：`sample_interval_seconds` 固定间隔生成锚点（默认 300s）。
-2. **正样本候选**：每个工单时刻前 `positive_prefault_seconds` 内按步长密集采样；
-   打标后 **保留 y=1** 行作为正类索引。
-3. **近故障负样本**：prefault 窗口内打标为 **y=0** 的点在 uniform/random 负采样**不足目标数量时**补入负类池（hard negative 补齐）。
+2. **正样本区**：每个工单失败时刻前 **label 窗口** `[ft − H, ft]` 内按
+   `positive_sample_interval_seconds`（默认 60s）密集采样；打标后 **保留 y=1**。
+   （旧实现曾在整个 prefault 窗用统一步长采样，H=300s、步长 300s 时每个故障仅 ~1 个正锚点。）
+3. **近故障区**：`[ft − positive_prefault_seconds, ft − H)` 内按 `sample_interval_seconds`
+   采样，打标为 **y=0**；在 uniform/random 负采样**不足目标数量时**补入负类池（hard negative）。
 4. **负样本平衡**：按 `target_positive_ratio` 控制正负比例；`uniform` 在网格上均匀取点，
    `random` 随机拒绝采样（冒烟 preset 默认）。
 5. **sid 覆盖**：负采样 **优先** 全部工单 sid，再覆盖 mcelog 中其余 sid。
-6. **有效时间窗**：锚点 clamp 在 **`[t_min + window_seconds, t_max - label_horizon_seconds]`**，
-   保证特征窗 `[predict_ts - W, predict_ts)` 与标签窗 `[predict_ts, predict_ts + H]` 均落在 mcelog 观测范围内。
+6. **有效锚点区间**：负样本 / 近故障区锚点 clamp 在 **`t_min + W ≤ predict_ts ≤ t_max − H`**。
+   **正样本区**在 **`[ft−H, ft]`** 采样（**ft 可 > t_max**）；右删截 **不**限制工单驱动正锚点。
 
 索引粒度为 **sid**（与 trouble_tickets 一致）；mcelog 的 memoryid 等列仅用于后续特征构造。
 """
@@ -148,7 +150,8 @@ class IndexBuildConfig:
         sample_interval_seconds: 锚点采样步长（秒）。
         label_horizon_seconds: 打标 horizon（秒），须与 preprocess 配置一致。
         window_seconds: 特征窗长度（秒）；锚点下界为 `t_min + window_seconds`。
-        positive_prefault_seconds: 工单前密集正样本候选窗口长度。
+        positive_prefault_seconds: 近故障 hard-neg 区起点 = `ft − prefetch`（秒）。
+        positive_sample_interval_seconds: 正样本 label 窗口 `[ft−H, ft]` 内采样步长（秒）。
         failure_types: 计入工单的 `failure_type` 列表（同 `label_failure_types`）。
         target_positive_ratio: 输出索引目标正例占比（约 0.05–0.95）。
         neg_stride_multiplier: 负采样网格步长 = interval × 该系数。
@@ -161,7 +164,7 @@ class IndexBuildConfig:
         mcelog_scan_rows: mcelog 扫描行数上限（None = 全文件）。
         mcelog_chunk_rows: 流式读 mcelog 的分块大小。
         min_positives / min_total_rows: 写入前校验阈值。
-        max_positive_candidates: 正样本行数上限（smoke preset 用于控规模）。
+        max_positive_candidates: 正样本行数上限（可选；smoke 由 max_rows 控规模，一般不单独截断正样本）。
     """
 
     mcelog_path: Path
@@ -170,6 +173,7 @@ class IndexBuildConfig:
     label_horizon_seconds: float = 300.0
     window_seconds: float = 300.0
     positive_prefault_seconds: float = 3600.0
+    positive_sample_interval_seconds: float = 60.0
     failure_types: list[int] = field(default_factory=lambda: [1, 2, 3])
     target_positive_ratio: float = 0.25
     neg_stride_multiplier: int = 1
@@ -181,9 +185,12 @@ class IndexBuildConfig:
     smoke_max_sids: int | None = None
     mcelog_scan_rows: int | None = None
     mcelog_chunk_rows: int = 1_000_000
-    min_positives: int = 3
+    min_positives: int = 5
     min_total_rows: int = 10
     max_positive_candidates: int | None = None
+    # 与 preprocess spatial 模式一致：bounds 扫描仅统计 CE 事件（默认 [1,2]）；legacy 模式用 error_type < 3
+    mcelog_error_type_filter: list[int] | None = field(default_factory=lambda: [1, 2])
+    grid_representation: str = "spatial_heatmap"
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], root: Path | None = None) -> IndexBuildConfig:
@@ -198,16 +205,38 @@ class IndexBuildConfig:
             return p if p.is_absolute() else (root / p).resolve()
 
         horizon = label_horizon_seconds_from_dict(raw)
+        sample_interval = float(raw.get("sample_interval_seconds", 300.0))
+        pos_interval_raw = raw.get("positive_sample_interval_seconds")
+        if pos_interval_raw in (None, "null"):
+            pos_interval = min(60.0, sample_interval, horizon)
+        else:
+            pos_interval = float(pos_interval_raw)
+        if pos_interval <= 0:
+            raise ValueError("positive_sample_interval_seconds must be > 0")
+        if pos_interval > horizon:
+            raise ValueError(
+                "positive_sample_interval_seconds 不能大于 label_horizon_seconds "
+                f"({pos_interval} > {horizon})"
+            )
         strategy = str(raw.get("neg_sample_strategy", "uniform")).lower().strip()
         if strategy not in {"uniform", "random"}:
             raise ValueError("neg_sample_strategy must be 'uniform' or 'random'")
+        grid_rep = str(raw.get("grid_representation", "spatial_heatmap"))
+        et_raw = raw.get("mcelog_error_type_filter")
+        if et_raw not in (None, "null"):
+            et_filter: list[int] | None = [int(x) for x in et_raw]
+        elif grid_rep == "legacy_rc_et":
+            et_filter = None
+        else:
+            et_filter = [1, 2]
         return cls(
             mcelog_path=_p("mcelog_path", "data/raw/mcelog.csv"),
             tickets_path=_p("tickets_path", "data/raw/trouble_tickets.csv"),
-            sample_interval_seconds=float(raw.get("sample_interval_seconds", 300.0)),
+            sample_interval_seconds=sample_interval,
             label_horizon_seconds=horizon,
             window_seconds=float(raw.get("window_seconds", horizon)),
             positive_prefault_seconds=float(raw.get("positive_prefault_seconds", 3600.0)),
+            positive_sample_interval_seconds=pos_interval,
             failure_types=[
                 int(x) for x in raw.get("failure_types", raw.get("label_failure_types", [1, 2, 3]))
             ],
@@ -229,13 +258,15 @@ class IndexBuildConfig:
                 else int(raw["mcelog_scan_rows"])
             ),
             mcelog_chunk_rows=int(raw.get("mcelog_chunk_rows", 1_000_000)),
-            min_positives=int(raw.get("min_positives", 3)),
+            min_positives=int(raw.get("min_positives", 5)),
             min_total_rows=int(raw.get("min_total_rows", 10)),
             max_positive_candidates=(
                 None
                 if raw.get("max_positive_candidates") in (None, "null")
                 else int(raw["max_positive_candidates"])
             ),
+            mcelog_error_type_filter=et_filter,
+            grid_representation=grid_rep,
         )
 
 
@@ -257,18 +288,23 @@ def scan_mcelog_sid_bounds(
     chunk_rows: int = 1_000_000,
     max_rows: int | None = None,
     time_epoch_offset: float = 0.0,
+    *,
+    mcelog_error_type_filter: list[int] | None = None,
+    legacy_error_type_lt: int | None = 3,
 ) -> dict[str, tuple[float, float]]:
     """流式扫描 mcelog，返回每个 sid 的 `(min_error_ts, max_error_ts)`（**相对秒**）。
 
-    仅读取 `sid`, `error_time` 两列，按 `chunk_rows` 分块聚合，适合全量 7500 万+ 行文件。
+    与 preprocess ``build_events_by_sid`` 使用相同的 error_type 过滤，避免 bounds 含 CE 外事件
+    而特征窗为空。spatial 默认仅 ``error_type ∈ {1,2}``；legacy 默认 ``error_type < 3``。
     """
-    _require_readable_csv(mcelog_path, "mcelog", ("sid", "error_time"))
+    _require_readable_csv(mcelog_path, "mcelog", ("sid", "error_time", "error_type"))
     bounds: dict[str, list[float]] = {}
     rows_read = 0
+    usecols = ["sid", "error_time", "error_type"]
     try:
         reader = pd.read_csv(
             mcelog_path,
-            usecols=["sid", "error_time"],
+            usecols=usecols,
             chunksize=chunk_rows,
             low_memory=False,
         )
@@ -282,6 +318,12 @@ def scan_mcelog_sid_bounds(
             if len(chunk) > remain:
                 chunk = chunk.iloc[:remain]
         rows_read += len(chunk)
+        if mcelog_error_type_filter is not None:
+            chunk = chunk[chunk["error_type"].isin(list(mcelog_error_type_filter))].copy()
+        elif legacy_error_type_lt is not None:
+            chunk = chunk[chunk["error_type"] < int(legacy_error_type_lt)].copy()
+        if chunk.empty:
+            continue
         ts = pd.Series(
             series_to_absolute_seconds(chunk["error_time"]) - float(time_epoch_offset),
             index=chunk.index,
@@ -303,7 +345,12 @@ def _valid_predict_bounds(
     win: float,
     horizon: float,
 ) -> tuple[float, float] | None:
-    """计算 sid 上合法锚点区间 `[t_min + win, t_max - horizon]`；无效则返回 None。"""
+    """计算 sid 上合法锚点闭区间 `[t_min + win, t_max - horizon]`。
+
+    - 左界：特征半开窗 ``[pts - win, pts)`` 需要 mcelog 自 ``t_min`` 起有覆盖。
+    - 右界：右删截，避免 ``pts + horizon`` 超出以 mcelog 时间轴为 proxy 的数据集末尾。
+    - 若 ``t_max - t_min < win + horizon``，该 sid 无法放置任何锚点，返回 ``None``。
+    """
     b = sid_bounds.get(sid)
     if b is None:
         return None
@@ -320,12 +367,17 @@ def _positive_candidates(
     cfg: IndexBuildConfig,
     sid_bounds: dict[str, tuple[float, float]],
 ) -> pd.DataFrame:
-    """在每条工单失败时刻前的 prefault 窗口内按步长生成候选锚点。
+    """在每条工单失败时刻前生成候选锚点（正样本区 + 近故障区两段采样）。
+
+    - **正样本区** ``[ft − horizon, ft]``：步长 ``positive_sample_interval_seconds``；
+      上界为工单失败时刻 **ft**（可超出 mcelog ``t_max``；特征窗或为空，标签仍来自 tickets）。
+    - **近故障区** ``[ft − prefetch, ft − horizon)``：步长 ``sample_interval_seconds``；
+      打标后为 y=0，供 hard negative 补齐。
 
     候选尚未打标；后续 `_label_split_candidates` 会区分 y=1 / y=0。
-    时间范围 clamp 在 mcelog 有效锚点区间内。
     """
-    interval = float(cfg.sample_interval_seconds)
+    pos_step = float(cfg.positive_sample_interval_seconds)
+    near_step = float(cfg.sample_interval_seconds)
     prefetch = float(cfg.positive_prefault_seconds)
     win = float(cfg.window_seconds)
     horizon = float(cfg.label_horizon_seconds)
@@ -336,19 +388,32 @@ def _positive_candidates(
         if vb is None:
             continue
         for ft in fail_arr:
-            start = float(ft) - prefetch
-            end = float(ft)
-            start = max(start, vb[0])
-            end = min(end, vb[1])
-            if end < start:
-                continue
-            for pts in _time_range(start, end, interval):
-                rows.append(
-                    {
-                        "sid": sid,
-                        "predict_time": relative_seconds_to_predict_time_str(float(pts)),
-                    }
-                )
+            ft = float(ft)
+            # 正样本区上界取工单失败时刻 ft（勿 clamp 到 vb[1]）：故障可晚于 mcelog 观测末尾，
+            # 此时特征窗可能为空但标签仍来自 tickets（preprocess 保留 y=1 空窗）。
+            pos_start = max(ft - horizon, vb[0])
+            pos_end = ft
+            if pos_end >= pos_start:
+                for pts in _time_range(pos_start, pos_end, pos_step):
+                    rows.append(
+                        {
+                            "sid": sid,
+                            "predict_time": relative_seconds_to_predict_time_str(float(pts)),
+                        }
+                    )
+
+            if prefetch > horizon:
+                near_start = max(ft - prefetch, vb[0])
+                # 半开上界 ft−H：锚点 ft−H 在正样本闭区间 [ft−H, ft] 内打 y=1，不应落入 near_neg
+                near_end = min(ft - horizon - 1e-6, vb[1])
+                if near_end >= near_start:
+                    for pts in _time_range(near_start, near_end, near_step):
+                        rows.append(
+                            {
+                                "sid": sid,
+                                "predict_time": relative_seconds_to_predict_time_str(float(pts)),
+                            }
+                        )
 
     if not rows:
         return pd.DataFrame(columns=["sid", "predict_time"])
@@ -532,13 +597,15 @@ def _truncate_to_max_rows(
     time_epoch_offset: float,
     by_sid_fail: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
-    """在 `max_rows` 限制下截断：保留全部正样本，负样本随机下采样至剩余配额。"""
+    """在 `max_rows` 限制下截断：正样本过多时先随机下采样至配额，再保留负样本至 `max_rows`。"""
     if cfg.max_rows is None or len(out) <= cfg.max_rows:
         return out
     y = _label_index_rows(out, cfg, time_epoch_offset, by_sid_fail=by_sid_fail)
     pos_mask = y == 1
     pos_part = out.loc[pos_mask].copy()
     neg_part = out.loc[~pos_mask]
+    if len(pos_part) > int(cfg.max_rows):
+        pos_part = pos_part.sample(n=int(cfg.max_rows), random_state=cfg.seed)
     n_neg_keep = max(0, int(cfg.max_rows) - len(pos_part))
     if len(neg_part) > n_neg_keep:
         neg_part = neg_part.sample(n=n_neg_keep, random_state=cfg.seed)
@@ -564,6 +631,8 @@ def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str
         chunk_rows=cfg.mcelog_chunk_rows,
         max_rows=cfg.mcelog_scan_rows,
         time_epoch_offset=time_epoch_offset,
+        mcelog_error_type_filter=cfg.mcelog_error_type_filter,
+        legacy_error_type_lt=(3 if cfg.mcelog_error_type_filter is None else None),
     )
     if not sid_bounds:
         raise RuntimeError(f"mcelog 扫描无有效 sid 时间范围: {cfg.mcelog_path}")
@@ -576,6 +645,7 @@ def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str
         raw_pos, cfg, time_epoch_offset, by_sid_fail=by_sid_fail
     )
 
+    n_raw_candidates = int(len(raw_pos))
     n_pos = len(pos_df)
     ratio = float(cfg.target_positive_ratio)
     ratio = min(max(ratio, 0.05), 0.95)
@@ -585,10 +655,11 @@ def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str
             "failure_types 与 mcelog 时间范围是否重叠。"
         )
 
-    if cfg.max_positive_candidates is not None and n_pos > cfg.max_positive_candidates:
-        pos_df = pos_df.sample(n=int(cfg.max_positive_candidates), random_state=cfg.seed).reset_index(
-            drop=True
-        )
+    max_pos_cap = cfg.max_positive_candidates
+    if max_pos_cap is None and cfg.max_rows is not None and ratio < 1.0:
+        max_pos_cap = max(cfg.min_positives, int(round(int(cfg.max_rows) * ratio / (1.0 - ratio))))
+    if max_pos_cap is not None and n_pos > int(max_pos_cap):
+        pos_df = pos_df.sample(n=int(max_pos_cap), random_state=cfg.seed).reset_index(drop=True)
         n_pos = len(pos_df)
 
     exclude = set(zip(ticket_df["sid"].astype(str), ticket_df["predict_time"].astype(str)))
@@ -626,6 +697,8 @@ def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str
         "ticket_sid_coverage_in_pos": float(ticket_sid_coverage),
         "n_neg_sids": int(neg_df["sid"].nunique()) if len(neg_df) else 0,
         "n_tickets_used": int(len(tix)),
+        "n_raw_prefault_candidates": n_raw_candidates,
+        "n_near_neg_labeled": int(len(near_neg)),
         "positive_candidates": int(n_pos),
         "negative_candidates_before_balance": int(n_neg_raw),
         "n_rows_output": int(len(out)),
@@ -669,7 +742,8 @@ def validate_and_write_index(
         tmp.unlink(missing_ok=True)
         raise RuntimeError(
             f"索引校验失败：正样本 {n_pos} < min_positives={cfg.min_positives}。"
-            "请增大 positive_prefault_seconds 或 mcelog_scan_rows。"
+            "请检查 positive_sample_interval_seconds、positive_prefault_seconds、"
+            "label_horizon_seconds 与 mcelog 时间范围是否重叠。"
         )
     if len(y) < cfg.min_total_rows:
         tmp.unlink(missing_ok=True)
@@ -682,10 +756,13 @@ def validate_and_write_index(
         "n_neg": n_neg,
         "pos_rate": float(n_pos / len(y)) if len(y) else 0.0,
         "label_horizon_seconds": cfg.label_horizon_seconds,
+        "window_seconds": cfg.window_seconds,
         "sample_interval_seconds": cfg.sample_interval_seconds,
         "time_epoch_offset_absolute": float(time_epoch_offset),
         "time_axis": "relative_seconds_since_global_min",
         "mcelog_scan_rows": cfg.mcelog_scan_rows,
+        "mcelog_error_type_filter": cfg.mcelog_error_type_filter,
+        "grid_representation": cfg.grid_representation,
     }
 
 

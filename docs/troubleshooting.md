@@ -2,16 +2,16 @@
 
 ## 切换 horizon / 索引后 validate 报错
 
-- **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）。  
-- **原因**：磁盘上 `data/processed` 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
-- **处理**：`rm -rf data/processed/* data/splits/*` 后，对目标实验 **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
+- **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）；或 preprocess 报 **`索引 sidecar label_horizon_seconds=300 与当前配置 1800 不一致`**。  
+- **原因**：磁盘上 `data/processed` / 索引 sidecar 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
+- **处理**：`bash scripts/build_horizon_indexes.sh smoke`（或 `full`）→ 更新实验 YAML 的 `index_features_path` → `rm -rf data/processed/* data/splits/*` → **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
 - **配置级预检**（尚未对该 horizon 重跑 preprocess）：**`bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml`**（跳过 manifest horizon 比对，仅检查 raw 路径与 processed 形状）。
 
 ## `use_weighted_sampler` 与 `positive_oversample_factor>1` 冲突
 
 - **现象**：训练启动报 `use_weighted_sampler=true 与 positive_oversample_factor>1 互斥`。  
 - **原因**：过采样扩展了 `IndexMappedDataset` 长度，但 `WeightedRandomSampler` 权重仍按原始 `y_train` 构造，会导致过采样 silently 失效。  
-- **处理**：保持 `configs/train.yaml` 默认 **`use_weighted_sampler: false`**（与 `positive_oversample_factor: 8` 联用）。
+- **处理**：保持 `configs/train.yaml` 默认 **`use_weighted_sampler: false`**（与 `positive_oversample_factor` 联用；当前默认 **2**，baseline 为 **1**）。
 
 ## evaluate 报 predictions 与 splits_dir 不一致
 
@@ -61,9 +61,10 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 
 ## 预处理 `pos_rate=0` 或训练日志里 AUC / PR-AUC 全是 nan
 
-- **含义**：索引行与工单打标规则对不上，或 **train/val 某一档没有正样本**，验证集上 ROC/PR 无法定义。
-- **冒烟模式（常见、非 bug）**：`exp_baseline` 演示索引在严格 mcelog 对齐下通常仅 **2～3 条真阳性**（`pos_rate≈0.004`），时间切分后 **train/val 可能均为 0 正例**，AUC/PR 为 nan 但 **`autotune.sh` 仍可跑通**——冒烟目标是链路验证，不追求指标。
-- **全量 / 需可读指标时**：检查 `label_failure_types`、`label_horizon_seconds` 与索引时间；`mcelog_max_rows`/`mcelog_scan_rows` 须一致；重建索引：**`bash scripts/build_index.sh smoke`**（或 `full`），再重跑 preprocess。
+- **含义**：索引行与工单打标规则对不上，或 **train/val 某一档没有正样本**（仅在使用 `split_strategy: time` 且无分层时常见），验证集上 ROC/PR 无法定义。
+- **冒烟模式**：默认 `time_stratified` + demo 索引（`min_positives≥5`）应保证 train/val/test 各有正例；若仍 nan，检查是否未重建索引或未重跑 preprocess。
+- **全量 / 需可读指标时**：检查 `label_failure_types`、`label_horizon_seconds` 与索引时间；`mcelog_max_rows`/`mcelog_scan_rows` 须一致；重建索引：**`bash scripts/build_index.sh full`**，再重跑 preprocess。
+- **全量索引正样本仍偏少**：查看 sidecar 中 `positive_candidates` 与 `ticket_sid_coverage_in_pos`。若后者极低，常见原因是工单 sid 与 mcelog 覆盖不一致，或故障时刻与 CE 事件时间轴错位。可适度增大 `positive_prefault_seconds`（近故障 hard neg）；**正样本**由 `positive_sample_interval_seconds` 在 **`[ft−H, ft]`** 决定（**ft 可晚于 mcelog 观测末尾**，此时特征窗可能为空，preprocess 仍保留 y=1）。
 - **Notebook**：`04_run_pipelines.ipynb` 中 **preflight_split_labels** 会在 train 前打印各 split 正例数；全量训练前若 val 正例为 0，应修数据或调整切分策略后再训。
 
 ## 时间与 `predict_ts`
@@ -72,12 +73,12 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 - **`predict_time` 列**：展示为 `1970-01-01` 起的 ISO 时间（= 相对秒的可读形式），由 **`bash scripts/build_index.sh smoke`** 写出；sidecar **`*.csv.stats.json`** 含 `time_axis: relative_seconds_since_global_min`。
 - **遗留索引**：若仍含「公元 0001」或公历 **2000+** 字符串，preprocess 会自动减 `t₀`（依据 sidecar / 字符串规则，非纯数值阈值）；建议重建索引后清空 `data/processed`、`data/splits` 重跑。
 - **`mcelog_max_rows` / `mcelog_scan_rows`**：冒烟模式下二者须一致（默认均为 **800000**）；不一致时 preprocess 会 **报错**。仅扫描前 N 行时 `t₀` 与 sid 边界可能不完整，全量请设为 `null`。
-- **工单 sid 无 mcelog**：索引构建会 **跳过** 无 mcelog 边界的 sid 正样本候选，避免产生全零特征窗行。
+- **工单 sid 无 mcelog**：索引构建会 **跳过** 无 CE 事件边界的 sid（无法定义 `t_min/t_max`）；有 mcelog 但故障晚于 `t_max` 时仍可在 `[ft−H, ft]` 生成正锚点（特征窗或为空）。
 - **勿用** `strftime('%Y-%m-%d')` 写四位年缺失的 `1-mm-dd`，会导致解析错位、`y` 全 0。
 
 ## 索引里 `predict_time` 不是整 5 分钟（:05/:10）
 
-- **含义**：本仓库索引按 **`sample_interval_seconds=300`** 在**相对时间轴**上取锚点（故障前 prefault 窗口、各 sid 的 mcelog 合法区间），**不对齐墙钟整 5 分钟**。  
+- **含义**：本仓库索引在**正样本 label 窗口** `[ft−H, ft]` 内按 **`positive_sample_interval_seconds`（默认 60s）** 取锚点；**近故障 / 负样本区**按 **`sample_interval_seconds=300`** 在相对时间轴上取点，**不对齐墙钟整 5 分钟**。
 - **是否正常**：是。标签/特征窗仍按相对秒定义：`[predict_ts−W, predict_ts)` 与 `[predict_ts, predict_ts+H]`。  
 - **详情**：见 **`docs/data_processing_guide.md` §3.5.1**。若需模拟线上 cron 整点推理，需另行在索引构建阶段做墙钟 snap（当前未实现）。
 
@@ -104,8 +105,9 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 
 ## `preprocess_manifest.json` 中 `n_empty_grids` > 0
 
-- **含义**：部分索引行的特征窗 `[predict_ts - W, predict_ts)` 在 mcelog 中无事件（sid 未出现在日志或窗口为空），对应 **`X` 行为全零**。  
-- **处理**：检查索引 sid 是否与 mcelog 覆盖一致；重建索引或缩小 `index_features_path` 至有效 sid 子集。
+- **含义**：该样本在 `[predict_ts − window_seconds, predict_ts)` 内无 mcelog 事件，对应 mcelog 通道为全零。
+- **默认行为**（`drop_empty_mcelog_windows: true`）：仅丢弃 **y=0** 的空窗行；**正样本** 空窗仍保留（manifest：`n_empty_grids_kept_positive`）。
+- **排查**：检查索引 sid 是否在 mcelog 中有覆盖、时间轴是否对齐；重建索引后清空 `data/processed`、`data/splits` 重跑 preprocess。
 
 ## 推理报错「无法解析阈值文件 best_threshold.json」
 

@@ -17,6 +17,7 @@ overrides:
     max_index_rows: 500
     mcelog_max_rows: 800000
     index_features_path: data/index_stubs/features_index_h1800s_step600s_smoke.csv
+    # 切分/归一化/空窗丢弃继承 configs/data.yaml（time_stratified、robust、drop_empty_mcelog_windows）
     # 全量对比：bash scripts/build_horizon_indexes.sh full 后改为 data/raw/features_index_h1800s_step600s_full.csv
   train:
     epochs: 20

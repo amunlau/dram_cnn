@@ -3,9 +3,14 @@ import torch
 
 from dram2cnn.data.dataset import IndexMappedDataset
 from dram2cnn.engine.imbalance import (
+    DEFAULT_FOCAL_GAMMA,
+    DEFAULT_POSITIVE_OVERSAMPLE_FACTOR,
+    DEFAULT_POSITIVE_WEIGHT_CAP,
     build_positive_oversample_index_map,
     compute_class_weights_tensor,
     compute_per_sample_weights,
+    focal_gamma_from_cfg,
+    positive_oversample_factor_from_cfg,
 )
 
 
@@ -92,3 +97,14 @@ def test_per_sample_weights_shape_and_positive_heavier():
     assert sw.shape == (5,)
     assert sw[y == 0][0] == 1.0
     assert sw[y == 1][0] > 1.0
+
+
+def test_imbalance_cfg_fallbacks_match_train_yaml_defaults():
+    """空 imb_cfg 时 fallback 须与 configs/train.yaml 默认一致。"""
+    assert positive_oversample_factor_from_cfg({}) == DEFAULT_POSITIVE_OVERSAMPLE_FACTOR
+    assert focal_gamma_from_cfg({}) == DEFAULT_FOCAL_GAMMA
+    w = compute_class_weights_tensor(
+        np.array([0, 0, 1], dtype=np.int64),
+        {},
+    )
+    assert float(w[1]) == min(2.0, DEFAULT_POSITIVE_WEIGHT_CAP)

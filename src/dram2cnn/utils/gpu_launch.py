@@ -14,7 +14,7 @@ from typing import Any, Literal
 import numpy as np
 import torch
 
-from dram2cnn.engine.imbalance import compute_class_weights_tensor
+from dram2cnn.engine.imbalance import compute_class_weights_tensor, focal_gamma_from_cfg
 from dram2cnn.models.factory import build_model
 from dram2cnn.models.losses import classification_loss
 from dram2cnn.utils.config import deep_update, load_experiment_config, project_root
@@ -141,8 +141,7 @@ def _batch_fits_vram_budget_train(
         if use_weight:
             y_train_np = np.load(splits_dir / "y_train.npy")
             class_w = compute_class_weights_tensor(y_train_np, imb_cfg).to(device)
-        _fg = imb_cfg.get("focal_gamma", 1.0)
-        focal_gamma = 0.0 if _fg is None else float(_fg)
+        focal_gamma = focal_gamma_from_cfg(imb_cfg)
 
         if tab is not None:
             logits = model(x, tab)

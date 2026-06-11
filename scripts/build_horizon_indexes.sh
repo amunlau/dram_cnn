@@ -24,9 +24,14 @@ else
 fi
 
 echo "=== 5 分钟 horizon（步长 5 分钟） mode=${MODE} ==="
+echo "  与 bash scripts/build_index.sh smoke 等价；canonical 路径为 features_5m_index_demo.csv"
 python3 scripts/build_index.py --mode "${MODE}" \
   --label-horizon-seconds 300 --sample-interval-seconds 300 \
-  --out "${OUT_DIR}/features_index_h300s_step300s_${SUFFIX}.csv"
+  --out "${OUT_DIR}/features_5m_index_demo.csv"
+if [[ "${MODE}" == "smoke" && "${OUT_DIR}" == "data/index_stubs" ]]; then
+  cp -f "${OUT_DIR}/features_5m_index_demo.csv" "${OUT_DIR}/features_index_h300s_step300s_smoke.csv"
+  echo "  已同步别名 → features_index_h300s_step300s_smoke.csv"
+fi
 
 echo "=== 30 分钟 horizon（步长 10 分钟） mode=${MODE} ==="
 python3 scripts/build_index.py --mode "${MODE}" \

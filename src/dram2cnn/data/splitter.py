@@ -2,16 +2,22 @@ from __future__ import annotations
 
 """train/val/test 切分与 **仅用训练集** 的归一化（网格 `[N,C,H,W]` + 可选 tabular `[N,F]`）。
 
-默认 **`split_by_time`**：按 `predict_ts` 排序后按比例切段，减轻未来信息泄漏。
+默认 **`split_by_time_stratified`**：按时间排序后分配样本，并保证各 split 至少含 `min_pos_per_split` 个正例。
+**`split_by_time`**：纯时间序切分（无标签分层）。
 **`split_by_sid`**：按服务器 ID 分层划分（需样本量足够）。
+
+归一化默认 **`robust`**（median / IQR，对 log1p 后长尾更稳）；可选 `zscore`。
 """
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+
+NormMethod = Literal["zscore", "robust"]
 
 
 def _remove_orphan_tabular_splits(splits_dir: Path) -> None:
@@ -26,33 +32,80 @@ def _remove_orphan_tabular_splits(splits_dir: Path) -> None:
             p.unlink()
 
 
-def normalize_split_features_by_train(splits_dir: str | Path) -> None:
-    """用 **X_train**（及若存在的 **tabular_train**）估 mean/std，写回各 split 的 `X_*.npy` / `tabular_*.npy`。"""
+def _fit_grid_normalizer(X_train: np.ndarray, method: NormMethod) -> tuple[np.ndarray, np.ndarray, dict]:
+    """在 X_train [N,C,H,W] 上拟合 per-(C,H,W) 归一化 center/scale。"""
+    if method == "robust":
+        center = np.median(X_train, axis=0, keepdims=True)
+        q75 = np.percentile(X_train, 75, axis=0, keepdims=True)
+        q25 = np.percentile(X_train, 25, axis=0, keepdims=True)
+        iqr = q75 - q25
+        mad = np.median(np.abs(X_train - center), axis=0, keepdims=True)
+        std = X_train.std(axis=0, keepdims=True) + 1e-6
+        scale = np.where(iqr > 1e-6, iqr, np.where(mad > 1e-6, mad, std))
+        note = (
+            "Per (C,H,W) median/IQR from X_train; IQR≈0 时回退 MAD，再回退 std，"
+            "缓解稀疏 voxel 在 val/test 上爆炸。"
+        )
+    elif method == "zscore":
+        center = X_train.mean(axis=0, keepdims=True)
+        scale = X_train.std(axis=0, keepdims=True) + 1e-6
+        note = "Per (C,H,W) mean/std from X_train only."
+    else:
+        raise ValueError(f"Unsupported normalization method: {method}")
+    return center, scale + 1e-6, {"method": method, "note": note}
+
+
+def normalize_split_features_by_train(
+    splits_dir: str | Path,
+    *,
+    method: NormMethod = "robust",
+    clip: float | None = 20.0,
+) -> None:
+    """用 **X_train**（及若存在的 **tabular_train**）估归一化统计量，写回各 split 的 `X_*.npy` / `tabular_*.npy`。"""
     out = Path(splits_dir)
+    stats_path = out / "normalization_stats.json"
+    if stats_path.is_file():
+        try:
+            prev = json.loads(stats_path.read_text(encoding="utf-8"))
+            if prev.get("normalized") is True:
+                raise ValueError(
+                    f"{stats_path} 表明 splits 已归一化；请勿二次 normalize。"
+                    "请清空 splits 并从 processed/ 重跑 preprocess。"
+                )
+        except json.JSONDecodeError:
+            pass
     train_path = out / "X_train.npy"
     if not train_path.exists():
         raise FileNotFoundError(f"Missing {train_path}; cannot fit normalization.")
     X_train = np.load(train_path).astype(np.float64, copy=False)
     if X_train.ndim != 4:
         raise ValueError(f"Expected X_train [N,C,H,W], got {X_train.shape}")
-    mean = X_train.mean(axis=0, keepdims=True)
-    std = X_train.std(axis=0, keepdims=True) + 1e-6
+
+    center, scale, norm_meta = _fit_grid_normalizer(X_train, method)
     for name in ("train", "val", "test"):
         p = out / f"X_{name}.npy"
         X = np.load(p).astype(np.float64, copy=False)
         if X.ndim != 4 or X.shape[1:] != X_train.shape[1:]:
             raise ValueError(f"Shape mismatch {p.name}: {X.shape} vs train {X_train.shape}")
-        Xn = ((X - mean) / std).astype(np.float32)
+        Xn = ((X - center) / scale).astype(np.float32)
+        if clip is not None and float(clip) > 0:
+            Xn = np.clip(Xn, -float(clip), float(clip))
         np.save(p, Xn)
 
     stats: dict = {
         "fit_split": "train",
+        "normalized": True,
         "axes": [0],
-        "mean_shape": list(mean.squeeze(axis=0).shape),
-        "std_shape": list(std.squeeze(axis=0).shape),
+        "method": norm_meta["method"],
+        "center_shape": list(center.squeeze(axis=0).shape),
+        "scale_shape": list(scale.squeeze(axis=0).shape),
         "epsilon": 1e-6,
-        "note": "Per (C,H,W) mean/std from X_train only.",
+        "clip": (float(clip) if clip is not None and float(clip) > 0 else None),
+        "note": norm_meta["note"],
     }
+    if method == "zscore":
+        stats["mean_shape"] = stats["center_shape"]
+        stats["std_shape"] = stats["scale_shape"]
 
     tab_train_path = out / "tabular_train.npy"
     if tab_train_path.exists():
@@ -66,8 +119,9 @@ def normalize_split_features_by_train(splits_dir: str | Path) -> None:
                 "note": "Skipped per-feature normalization (one-hot tabular).",
             }
         else:
-            tm = T_train.mean(axis=0, keepdims=True)
-            ts = T_train.std(axis=0, keepdims=True) + 1e-6
+            tm, ts, tab_meta = _fit_grid_normalizer(T_train[:, :, np.newaxis, np.newaxis], method)
+            tm = tm.reshape(1, -1)
+            ts = ts.reshape(1, -1)
             for name in ("train", "val", "test"):
                 tp = out / f"tabular_{name}.npy"
                 T = np.load(tp).astype(np.float64, copy=False)
@@ -76,11 +130,12 @@ def normalize_split_features_by_train(splits_dir: str | Path) -> None:
                 Tn = ((T - tm) / ts).astype(np.float32)
                 np.save(tp, Tn)
             stats["tabular"] = {
-                "mean_shape": list(tm.squeeze(axis=0).shape),
-                "std_shape": list(ts.squeeze(axis=0).shape),
+                "center_shape": list(tm.squeeze(axis=0).shape),
+                "scale_shape": list(ts.squeeze(axis=0).shape),
+                "method": tab_meta["method"],
                 "epsilon": 1e-6,
                 "normalized": True,
-                "note": "Per-feature mean/std from tabular_train only.",
+                "note": tab_meta["note"],
             }
 
     (out / "normalization_stats.json").write_text(json.dumps(stats, indent=2), encoding="utf-8")
@@ -117,7 +172,76 @@ def _load_processed_arrays(pdir: Path) -> tuple[np.ndarray, np.ndarray, pd.DataF
     return X, y, meta, tab
 
 
-def split_by_sid(processed_dir: str, splits_dir: str, random_state: int = 42) -> None:
+def _resolve_norm_method(method: str | None) -> NormMethod:
+    m = str(method or "robust").lower().strip()
+    if m not in {"zscore", "robust"}:
+        raise ValueError(f"normalization_method 须为 zscore 或 robust，当前: {method}")
+    return m  # type: ignore[return-value]
+
+
+def _compute_time_split_sizes(n: int, train_ratio: float, val_ratio: float, test_ratio: float) -> tuple[int, int, int]:
+    """按比例计算 train/val/test 样本数，保证每档至少 1。"""
+    n_train = max(1, int(round(n * train_ratio)))
+    n_val = max(1, int(round(n * val_ratio)))
+    n_test = n - n_train - n_val
+    if n_test < 1:
+        if n_train > n_val and n_train > 1:
+            n_train -= 1
+        elif n_val > 1:
+            n_val -= 1
+        n_test = n - n_train - n_val
+    if n_train < 1 or n_val < 1 or n_test < 1:
+        raise ValueError(
+            f"时间切分比例导致某一档为空（n={n}，ratio={train_ratio}/{val_ratio}/{test_ratio}）；"
+            "请增大索引样本量或调整 time_split。"
+        )
+    return n_train, n_val, n_test
+
+
+def _resolve_norm_clip(data_cfg: dict | None) -> float | None:
+    if data_cfg is None:
+        return 20.0
+    raw = data_cfg.get("normalization_clip")
+    if raw in (None, "null", False):
+        return None
+    return float(raw)
+
+
+def _write_splits_and_normalize(
+    X: np.ndarray,
+    y: np.ndarray,
+    meta: pd.DataFrame,
+    tab: np.ndarray | None,
+    train_idx: np.ndarray,
+    val_idx: np.ndarray,
+    test_idx: np.ndarray,
+    out: Path,
+    *,
+    normalization_method: str | None = "robust",
+    normalization_clip: float | None = 20.0,
+) -> None:
+    """写入 train/val/test 数组并调用 ``normalize_split_features_by_train``（单一出口，避免三处重复）。"""
+    out.mkdir(parents=True, exist_ok=True)
+    if tab is None:
+        _remove_orphan_tabular_splits(out)
+    _save_split(X, y, meta, train_idx, out, "train", tab)
+    _save_split(X, y, meta, val_idx, out, "val", tab)
+    _save_split(X, y, meta, test_idx, out, "test", tab)
+    normalize_split_features_by_train(
+        out,
+        method=_resolve_norm_method(normalization_method),
+        clip=normalization_clip,
+    )
+
+
+def split_by_sid(
+    processed_dir: str,
+    splits_dir: str,
+    random_state: int = 42,
+    *,
+    normalization_method: str | None = "robust",
+    normalization_clip: float | None = 20.0,
+) -> None:
     """按 **sid** 划分 train/val/test（固定比例约 64% / 16% / 20%），再归一化。
 
     先对唯一 sid 做 80/20 分出 test，再对剩余 sid 做 80/20 分出 val，等价于 sid 级 64/16/20。
@@ -130,7 +254,7 @@ def split_by_sid(processed_dir: str, splits_dir: str, random_state: int = 42) ->
     if len(sids) < 5:
         raise ValueError(
             f"split_by_sid 需要至少 5 个唯一 sid（当前 {len(sids)} 个）。"
-            "样本过少时请改用 configs 中 split_strategy: time。"
+            "样本过少时请改用 configs 中 split_strategy: time_stratified。"
         )
     train_sid, test_sid = train_test_split(sids, test_size=0.2, random_state=random_state)
     train_sid, val_sid = train_test_split(train_sid, test_size=0.2, random_state=random_state)
@@ -139,16 +263,25 @@ def split_by_sid(processed_dir: str, splits_dir: str, random_state: int = 42) ->
         return meta.index[meta["sid"].isin(set(sid_set))].to_numpy()
 
     out = Path(splits_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    if tab is None:
-        _remove_orphan_tabular_splits(out)
-    _save_split(X, y, meta, idx_of(train_sid), out, "train", tab)
-    _save_split(X, y, meta, idx_of(val_sid), out, "val", tab)
-    _save_split(X, y, meta, idx_of(test_sid), out, "test", tab)
-    normalize_split_features_by_train(out)
+    _write_splits_and_normalize(
+        X, y, meta, tab,
+        idx_of(train_sid), idx_of(val_sid), idx_of(test_sid),
+        out,
+        normalization_method=normalization_method,
+        normalization_clip=normalization_clip,
+    )
 
 
-def split_by_time(processed_dir: str, splits_dir: str, train_ratio: float, val_ratio: float, test_ratio: float) -> None:
+def split_by_time(
+    processed_dir: str,
+    splits_dir: str,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    *,
+    normalization_method: str | None = "robust",
+    normalization_clip: float | None = 20.0,
+) -> None:
     """按 **`predict_ts` 升序** 后按时间比例切分，再调用 `normalize_split_features_by_train`。"""
     if round(train_ratio + val_ratio + test_ratio, 5) != 1.0:
         raise ValueError("train/val/test ratios must sum to 1.0")
@@ -167,30 +300,122 @@ def split_by_time(processed_dir: str, splits_dir: str, train_ratio: float, val_r
     if n < 3:
         raise ValueError("样本过少，无法按时间切分（至少需要 3 条）")
 
-    n_train = max(1, int(round(n * train_ratio)))
-    n_val = max(1, int(round(n * val_ratio)))
-    n_test = n - n_train - n_val
-    if n_test < 1:
-        if n_train > n_val and n_train > 1:
-            n_train -= 1
-        elif n_val > 1:
-            n_val -= 1
-        n_test = n - n_train - n_val
-    if n_train < 1 or n_val < 1 or n_test < 1:
-        raise ValueError(
-            f"时间切分比例导致某一档为空（n={n}，ratio={train_ratio}/{val_ratio}/{test_ratio}）；"
-            "请增大 max_index_rows 或调整 time_split。"
-        )
+    n_train, n_val, n_test = _compute_time_split_sizes(n, train_ratio, val_ratio, test_ratio)
 
     train_idx = np.arange(0, n_train)
     val_idx = np.arange(n_train, n_train + n_val)
     test_idx = np.arange(n_train + n_val, n)
 
     out = Path(splits_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    if tab_o is None:
-        _remove_orphan_tabular_splits(out)
-    _save_split(X_o, y_o, meta_o, train_idx, out, "train", tab_o)
-    _save_split(X_o, y_o, meta_o, val_idx, out, "val", tab_o)
-    _save_split(X_o, y_o, meta_o, test_idx, out, "test", tab_o)
-    normalize_split_features_by_train(out)
+    _write_splits_and_normalize(
+        X_o, y_o, meta_o, tab_o,
+        train_idx, val_idx, test_idx,
+        out,
+        normalization_method=normalization_method,
+        normalization_clip=normalization_clip,
+    )
+
+
+def split_by_time_stratified(
+    processed_dir: str,
+    splits_dir: str,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    *,
+    min_pos_per_split: int = 1,
+    normalization_method: str | None = "robust",
+    normalization_clip: float | None = 20.0,
+) -> None:
+    """按时间分层切分：负样本按时间序填充各 split，正样本保证每档至少 `min_pos_per_split` 个。
+
+    正样本按 `predict_ts` 排序后依次划入 train/val/test（保留时间先后，同时避免正例全落 test）。
+    负样本在剩余容量内按时间序依次填入 train → val → test。
+    """
+    if round(train_ratio + val_ratio + test_ratio, 5) != 1.0:
+        raise ValueError("train/val/test ratios must sum to 1.0")
+    min_pos = max(0, int(min_pos_per_split))
+
+    pdir = Path(processed_dir)
+    X, y, meta, tab = _load_processed_arrays(pdir)
+    if "predict_ts" not in meta.columns:
+        raise ValueError("meta.csv 需含 predict_ts 列（由 preprocess 写入）")
+
+    n = len(y)
+    if n < 3:
+        raise ValueError("样本过少，无法切分（至少需要 3 条）")
+
+    ts = meta["predict_ts"].to_numpy(dtype=np.float64)
+    pos_idx = np.flatnonzero(y == 1)
+    neg_idx = np.flatnonzero(y == 0)
+    n_pos = int(len(pos_idx))
+
+    if min_pos > 0 and n_pos < 3 * min_pos:
+        raise ValueError(
+            f"time_stratified 切分需要至少 {3 * min_pos} 个正样本（min_pos_per_split={min_pos}×3），"
+            f"当前仅 {n_pos} 个。请重建索引（提高 min_positives / positive_sample_interval_seconds）"
+            "或改用 split_strategy: sid。"
+        )
+
+    n_train, n_val, n_test = _compute_time_split_sizes(n, train_ratio, val_ratio, test_ratio)
+
+    pos_sorted = pos_idx[np.argsort(ts[pos_idx], kind="mergesort")]
+    neg_sorted = neg_idx[np.argsort(ts[neg_idx], kind="mergesort")]
+
+    if n_pos > 0 and min_pos > 0:
+        base = min_pos
+        rem = n_pos - 3 * base
+        if rem < 0:
+            raise ValueError(
+                f"正样本 {n_pos} 不足以满足 min_pos_per_split={min_pos}（需 >= {3 * min_pos}）。"
+            )
+        extra_tr = int(round(rem * train_ratio))
+        extra_va = int(round(rem * val_ratio))
+        extra_te = rem - extra_tr - extra_va
+        n_pos_tr = base + extra_tr
+        n_pos_va = base + extra_va
+        n_pos_te = base + extra_te
+        train_pos = pos_sorted[:n_pos_tr]
+        val_pos = pos_sorted[n_pos_tr : n_pos_tr + n_pos_va]
+        test_pos = pos_sorted[n_pos_tr + n_pos_va :]
+    else:
+        train_pos = np.array([], dtype=np.int64)
+        val_pos = np.array([], dtype=np.int64)
+        test_pos = np.array([], dtype=np.int64)
+
+    cap_tr = max(0, n_train - len(train_pos))
+    cap_va = max(0, n_val - len(val_pos))
+    cap_te = max(0, n_test - len(test_pos))
+
+    ptr = 0
+    train_neg = neg_sorted[ptr : ptr + cap_tr]
+    ptr += len(train_neg)
+    val_neg = neg_sorted[ptr : ptr + cap_va]
+    ptr += len(val_neg)
+    test_neg = neg_sorted[ptr : ptr + cap_te]
+
+    train_idx = np.sort(np.concatenate([train_pos, train_neg]))
+    val_idx = np.sort(np.concatenate([val_pos, val_neg]))
+    test_idx = np.sort(np.concatenate([test_pos, test_neg]))
+
+    split_total = len(train_idx) + len(val_idx) + len(test_idx)
+    if split_total != n:
+        raise ValueError(
+            f"time_stratified 切分样本数不守恒：train+val+test={split_total} != processed n={n}。"
+            "请检查 time_split 比例与 min_pos_per_split。"
+        )
+
+    if len(train_idx) == 0 or len(val_idx) == 0 or len(test_idx) == 0:
+        raise ValueError(
+            f"分层时间切分失败：train={len(train_idx)} val={len(val_idx)} test={len(test_idx)}。"
+            "请检查样本量与 time_split 比例。"
+        )
+
+    out = Path(splits_dir)
+    _write_splits_and_normalize(
+        X, y, meta, tab,
+        train_idx, val_idx, test_idx,
+        out,
+        normalization_method=normalization_method,
+        normalization_clip=normalization_clip,
+    )

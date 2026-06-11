@@ -26,7 +26,7 @@
 1. **索引表**：`(sid, predict_time)`；`predict_ts` 为 **相对秒**（全数据最早 raw 时刻 = 0）；由 **`scripts/build_index.py`** 从 `data/raw` 生成。
 2. **特征窗口**：半开区间 **`[predict_ts − window_seconds, predict_ts)`**（相对秒轴上计算）。
 3. **标签窗口**：闭区间 **`[predict_ts, predict_ts + label_horizon_seconds]`**。默认 **300s**。
-4. **索引策略**：工单前 `positive_prefault_seconds` 内密集采样 → 打标后保留真阳性；其余时段负采样（全量 `uniform`、冒烟 `random`）并尽量逼近 `target_positive_ratio`（实际 pos_rate 受 mcelog 覆盖影响，冒烟可极低）。
+4. **索引策略**：正样本在 **`[ft−H, ft]`**（**ft 可晚于 mcelog 末尾**）按 `positive_sample_interval_seconds` 采样；近故障 hard neg 在 **`[ft−prefault, ft−H)`**；其余负样本在 **`[t_min+W, t_max−H]`** 内均匀/随机采样并逼近 `target_positive_ratio`。
 
 ---
 
@@ -83,6 +83,8 @@ flowchart LR
 | `scripts/train_ddp.sh` | 全量多卡训练入口（调用 `train.sh`） |
 | `scripts/optuna.sh` | GridCNN-Deep 超参搜索（Optuna，trial 内 DDP） |
 | `scripts/autotune.sh` | preprocess → train → infer → evaluate 一键冒烟 |
+| `scripts/clean.sh` | 清理 runs、processed/splits、outputs 生成物、缓存（可选 `--notebooks` 清输出） |
+| `scripts/inspect_data.sh` | 原始 CSV / 索引 / manifest 快速体检 |
 | `scripts/verify_ddp.sh` | 多卡 DDP 回归验证（需 ≥2 GPU） |
 
 ---
@@ -108,6 +110,7 @@ bash scripts/build_index.sh smoke
 # 全量：bash scripts/build_index.sh full
 
 # 2. 预处理（含末尾 validate）→ 训练 → 推理 → 评估（完整分步见 docs/user_guide.md §5）
+# 冒烟实验 exp_baseline 使用轻量 configs/model_smoke.yaml + time_stratified 切分
 bash scripts/preprocess.sh configs/experiments/exp_baseline.yaml
 # 可选：单独复查 splits/manifest 时再跑 validate.sh
 # bash scripts/validate.sh configs/experiments/exp_baseline.yaml

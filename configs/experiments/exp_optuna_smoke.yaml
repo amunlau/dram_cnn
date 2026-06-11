@@ -1,4 +1,5 @@
-# Optuna 超参搜索入口（需先 preprocess；建议基于 exp_baseline 小样本）
+# Optuna 超参搜索入口（需先 preprocess；小样本与 exp_baseline 相同 data 截断）
+# 模型用完整 configs/model.yaml（非 baseline 的 model_smoke.yaml），以便搜索 backbone/head 容量
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml

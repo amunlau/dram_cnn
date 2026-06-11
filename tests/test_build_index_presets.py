@@ -14,6 +14,8 @@ def test_smoke_preset_overrides_index_build_base() -> None:
     ib_raw.update({k: v for k, v in preset.items() if v is not None})
     assert ib_raw["neg_sample_strategy"] == "random"
     assert ib_raw["max_rows"] == 500
+    assert ib_raw["min_positives"] == 5
+    assert ib_raw["positive_sample_interval_seconds"] == 60
 
 
 def test_build_index_cli_horizon_sets_window_to_horizon() -> None:
@@ -57,8 +59,10 @@ def test_full_preset_overrides_neg_sampling() -> None:
     ib_raw = dict(data_cfg.get("index_build") or {})
     preset = dict(data_cfg.get("index_build_presets") or {}).get("full", {})
     ib_raw.update({k: v for k, v in preset.items() if v is not None})
-    assert ib_raw["min_neg_per_ticket_sid"] == 2
-    assert ib_raw["max_neg_grid_points_per_sid"] == 256
+    assert ib_raw["min_neg_per_ticket_sid"] == 3
+    assert ib_raw["max_neg_grid_points_per_sid"] == 512
+    assert ib_raw["positive_sample_interval_seconds"] == 60
+    assert ib_raw["target_positive_ratio"] == 0.15
 
 
 def test_horizon_from_data_yaml_not_index_build_duplicate() -> None:

@@ -109,12 +109,12 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 
 | 实验 YAML | 用途 |
 |-----------|------|
-| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**overrides 关闭 DDP/auto_batch** 以加速 CI |
-| `exp_full_best_ddp.yaml` | **全量 + 多卡**：取消行数截断、`num_workers=8`；**gpu/ddp 继承 base 默认** |
+| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**time_split 0.6/0.2/0.2**；**model_smoke.yaml**；**overrides 关闭 DDP/auto_batch** |
+| `exp_full_best_ddp.yaml` | **全量 + 多卡**：取消行数截断、`num_workers=8`；**time_split 继承 data.yaml 0.7/0.15/0.15**；**gpu/ddp 继承 base 默认** |
 | `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（配合 `scripts/verify_ddp.sh`） |
 | `exp_horizon_30m.yaml` | 30 分钟预测窗；**冒烟 overrides 关闭 DDP/auto_batch**（同 baseline） |
 | `exp_horizon_1h.yaml` | 1 小时预测窗；**冒烟 overrides 关闭 DDP/auto_batch** |
-| `exp_optuna_smoke.yaml` | Optuna 超参搜索（小样本）；**gpu/ddp 继承 base 多卡默认** |
+| `exp_optuna_smoke.yaml` | Optuna 超参搜索（小样本 data 截断；**完整 model.yaml**）；**gpu/ddp 继承 base 多卡默认** |
 
 训练/推理产物写入 `runs/<run_name>/`（见 `configs/base.yaml` 的 `run_name`）。
 
@@ -326,6 +326,7 @@ bash scripts/optuna.sh \
 | `evaluate.sh [exp]` | 指标与图表 | `exp_baseline.yaml` |
 | `optuna.sh [exp] [hpo]` | 超参搜索 | `exp_optuna_smoke.yaml` |
 | `autotune.sh` | 一键冒烟全流程 | 见 `src/dram2cnn/pipelines/run_autotune.py` 的 `EXPS` |
+| `clean.sh [--notebooks]` | 清理 runs、processed/splits、outputs 生成物、缓存 | — |
 | `verify_ddp.sh` | 多卡 DDP 回归（train/infer/optuna） | `exp_ddp_verify.yaml` |
 | `inspect_data.sh` | 查看 processed 概览 | — |
 
@@ -483,9 +484,9 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 优先查阅 [`troubleshooting.md`](troubleshooting.md)，常见项包括：
 
 - `X_train` 与 `model.yaml` 形状不一致 → 重跑 preprocess
-- `pos_rate=0` 或 AUC 全 nan → 冒烟演示索引可能仅 ~2 条正例且 val 无 pos（预期）；全量训练时检查索引与工单打标
+- `pos_rate=0` 或 AUC 全 nan → 检查 `split_strategy`（默认 `time_stratified`）与索引正例数；全量训练时检查索引与工单打标
 - `exp_full_best_ddp` 样本数仍 ~500 → 未改 `index_features_path`
-- `n_empty_grids > 0` → 索引 sid 与 mcelog 不对齐
+- `n_empty_grids > 0` → 部分样本 mcelog 窗为空；默认仅丢弃 **负样本** 空窗（见 `drop_empty_mcelog_windows`）
 - DDP `nproc > GPU 数` → 调整 `nproc_per_node` 或 `CUDA_VISIBLE_DEVICES`
 
 ---

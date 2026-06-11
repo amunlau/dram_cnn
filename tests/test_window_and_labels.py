@@ -14,7 +14,7 @@ from dram2cnn.data.time_axis import (
     predict_time_series_looks_relative,
     resolve_index_predict_ts,
 )
-from dram2cnn.data.tianchi_build import merge_ticket_labels, window_slice
+from dram2cnn.data.tianchi_build import _validate_index_sidecar_against_config, merge_ticket_labels, window_slice
 
 
 def test_window_slice_half_open() -> None:
@@ -107,6 +107,25 @@ def test_index_sidecar_and_resolve(tmp_path: Path) -> None:
     assert index_file_uses_relative_display(idx) is True
     rel = resolve_index_predict_ts(pd.Series(["1970-01-01 00:10:00"]), time_epoch_offset=None, index_path=idx)
     assert abs(float(rel[0]) - 600.0) < 1e-3
+
+
+def test_validate_index_sidecar_horizon_mismatch() -> None:
+    idx_stats = {
+        "label_horizon_seconds": 300,
+        "window_seconds": 300,
+        "time_epoch_offset_absolute": 0.0,
+    }
+    data_cfg = {"label_horizon_seconds": 1800, "window_seconds": 1800}
+    with pytest.raises(ValueError, match="label_horizon_seconds"):
+        _validate_index_sidecar_against_config(
+            idx_stats, data_cfg, mcelog_cap=None, time_epoch_offset=0.0
+        )
+
+    idx_stats["label_horizon_seconds"] = 1800
+    with pytest.raises(ValueError, match="window_seconds"):
+        _validate_index_sidecar_against_config(
+            idx_stats, data_cfg, mcelog_cap=None, time_epoch_offset=0.0
+        )
 
 
 def test_valid_predict_bounds_none_when_window_too_long() -> None:

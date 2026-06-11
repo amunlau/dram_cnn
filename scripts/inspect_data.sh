@@ -106,6 +106,9 @@ if man_p.is_file():
         "n_samples",
         "pos_rate",
         "n_empty_grids",
+        "n_empty_grids_dropped",
+        "n_empty_grids_kept_positive",
+        "drop_empty_mcelog_windows",
     ):
         if k in man:
             print(f"  {k}: {man[k]}")

@@ -206,10 +206,13 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
             )
         n_samples = int(man.get("n_samples") or 0)
         n_empty = int(man.get("n_empty_grids") or 0)
-        if n_samples > 0 and n_empty / n_samples >= 0.5:
+        n_dropped = int(man.get("n_empty_grids_dropped") or 0)
+        n_before = int(man.get("n_samples_before_drop") or (n_samples + n_dropped))
+        if n_before > 0 and n_empty / n_before >= 0.5:
             report["warnings"].append(
-                f"n_empty_grids={n_empty}/{n_samples}（{100 * n_empty / n_samples:.1f}% 样本 mcelog 窗口为空）；"
-                "冒烟截断下常见，全量训练前请确认 mcelog 与索引对齐。"
+                f"n_empty_grids={n_empty}（已丢弃负样本空窗 {n_dropped}，保留正样本空窗 "
+                f"{int(man.get('n_empty_grids_kept_positive') or 0)}）；"
+                "冒烟 mcelog 截断下常见，全量请取消 mcelog_max_rows。"
             )
 
     x_proc = processed_dir / "X.npy"

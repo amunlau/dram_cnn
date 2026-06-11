@@ -1,6 +1,6 @@
 base: configs/base.yaml
 data: configs/data.yaml
-model: configs/model.yaml
+model: configs/model_smoke.yaml
 train: configs/train.yaml
 infer: configs/infer.yaml
 
@@ -17,9 +17,22 @@ overrides:
     grid_representation: spatial_heatmap
     inventory_as_grid_channels: true
     index_features_path: data/index_stubs/features_5m_index_demo.csv
+    split_strategy: time_stratified
+    drop_empty_mcelog_windows: true
+    normalization_method: robust
+    time_split:
+      train_ratio: 0.6
+      val_ratio: 0.2
+      test_ratio: 0.2
+      min_pos_per_split: 1
   train:
     epochs: 20
     patience: 6
+    imbalance:
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
+      positive_oversample_factor: 1
     gpu:
       auto_batch_size: false
     ddp:

@@ -18,14 +18,14 @@
 - **`tabular.npy`**：`float32`，`[N, F]`，**仅当**配置写出时存在。默认 **`spatial_heatmap` + `inventory_as_grid_channels: true`** 时 **不产生** `tabular.npy`（inventory 已拼入 **`X`** 通道；缺 inventory 时对应通道为 0）。legacy 或 spatial+独立 tabular 时常为 **`F=15`**。
 - **`y.npy`**：`int64`，`[N]`
 - **`meta.csv`**：`sid`, `predict_time`（1970 起算展示）, `label`, `predict_ts`（相对秒，≥ 0）
-- **`preprocess_manifest.json`**：`grid_shape`、`schema`、`grid_representation`、`tabular_dim`、`index_features_path`、`window_seconds`、`label_horizon_seconds`（与 `label_backtrace_seconds` 同值）、`time_axis`（`relative_seconds_since_global_min`）、`time_epoch_offset_absolute`（全局 `t₀`）、`mcelog_max_rows`（冒烟截断行数，`null` 表示全文件）、`row_bin_size` / `col_bin_size`（spatial）、`inventory_as_grid_channels`、并行开关、`n_empty_grids`（窗口内无 mcelog 事件的样本数，>0 时应检查索引与 raw 对齐）等
+- **`preprocess_manifest.json`**：`grid_shape`、`schema`、`n_samples`、`pos_rate`、`drop_empty_mcelog_windows`、`n_empty_grids`（填网格时检测到的空窗数）、`n_empty_grids_dropped`（丢弃的负样本空窗数）、`n_empty_grids_kept_positive`（保留的正样本空窗数）、`index_features_path`、`window_seconds`、`label_horizon_seconds`、`time_axis`、`time_epoch_offset_absolute`、`mcelog_max_rows`、spatial 分箱与并行开关等
 - **索引 sidecar**（`*.csv.stats.json`）：与 manifest 对齐的 `time_epoch_offset_absolute`、`mcelog_scan_rows`；preprocess 会校验二者与当前配置一致
 
 ## 切分（`data/splits/`）
 
 - **`X_{train,val,test}.npy`**、**`y_*.npy`**：与 **`meta_*.csv`** 行序一致
 - **`tabular_{train,val,test}.npy`**：当 **`processed/`** 包含 **`tabular.npy`** 时存在；否则无此文件（与 **`model.tabular_dim=0`** 配套）
-- **`normalization_stats.json`**：按 **`X_train`** 的 per-(C,H,W) 标准化；若存在 tabular split，另含按 **`tabular_train`** 逐特征标准化说明
+- **`normalization_stats.json`**：`method`（`robust`|`zscore`）、`center_shape`/`scale_shape`（per-(C,H,W)）、可选 `clip`；tabular 分支同结构
 
 ## 模型输入契约（`configs/model.yaml` → GridCNN-Deep）
 
