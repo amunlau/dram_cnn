@@ -66,16 +66,15 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
 
     if is_stub_index_path(idx_path):
         logger.warning(
-            "当前索引仍指向仓库内 **演示/stub CSV**（约 500 行）。"
-            " `exp_full_best_ddp` 中的「全量」仅表示 **取消 max_index_rows / mcelog_max_rows 截断**，"
-            " **不会**自动替换为天池全量索引表。全量请先 `bash scripts/build_index.sh full`，再在 "
-            "`configs/data.yaml` 或实验 `overrides.data.index_features_path` 中改为 "
-            "`data/raw/features_index_*.csv` 后 **重跑 preprocess**。"
+            "当前 index_features_path 仍指向 **演示/stub CSV**（约 500 行）。"
+            " 冒烟请用 exp_baseline；全量请 `bash scripts/build_index.sh full` 并确认 "
+            "exp_full_best_ddp.yaml 的 index_features_path 为 data/raw/features_index_*_full.csv，"
+            " 清空 data/processed 与 data/splits 后 **重跑 preprocess**。"
         )
 
     if n_va < 32:
         logger.warning(
-            "验证集极小 (N_val=%d)：验证集 ROC/PR/F1 方差大，`train.early_stop_metric`（如 avg_precision）"
+            "验证集极小 (N_val=%d)：验证集 ROC/PR/F1 方差大，`train.early_stop_metric`（默认 best_f1）"
             " 易在首轮即达平台，随后连续 patience=%d 轮无提升会触发早停；这不等于数据泄漏。",
             n_va,
             patience,

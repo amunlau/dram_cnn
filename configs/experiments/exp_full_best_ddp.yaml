@@ -22,8 +22,10 @@ overrides:
   train:
     imbalance:
       positive_oversample_factor: 2
-      positive_weight_cap: 50.0
-      focal_gamma: 0.5
+      # GridCNN-Deep（model.yaml）+ focal_gamma>0 在默认 lr 下易第 2 步梯度 NaN；与 exp_baseline 对齐更稳
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
     num_workers: 2
     prefetch_factor: 2
     # gpu / ddp 继承 base.yaml（auto 多卡 + 80% 显存 batch）

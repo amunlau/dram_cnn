@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from dram2cnn.engine.metrics import build_confusion, build_pr_curve, classification_metrics, search_best_threshold
@@ -30,6 +31,16 @@ def evaluate(pred_csv: str, output_json: str) -> None:
             raise ValueError(
                 f"predictions.csv 缺少必需列 `{col}`（当前列: {list(df.columns)}）。"
                 "请确认 infer 步骤完整执行且 checkpoint 与 splits 匹配。"
+            )
+
+    if "y_prob" in df.columns:
+        y_prob_raw = df["y_prob"].to_numpy(dtype=float, copy=False)
+        if len(y_prob_raw) > 0 and not np.isfinite(y_prob_raw).all():
+            n_bad = int(np.sum(~np.isfinite(y_prob_raw)))
+            raise ValueError(
+                f"predictions.csv 中 y_prob 含 {n_bad}/{len(y_prob_raw)} 个非有限值（NaN/Inf）。"
+                "这通常表示训练 checkpoint 已数值崩溃（train log 中 loss=nan）。"
+                "请检查 train 配置（GridCNN-Deep 建议 focal_gamma=0），删除 train/infer marker 后重训。"
             )
 
     # 当前预测标签对应阈值下的指标。

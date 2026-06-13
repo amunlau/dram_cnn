@@ -32,7 +32,7 @@ EXP_CONFIG="${1:-configs/experiments/exp_full_best_ddp.yaml}"
 echo "[train_ddp.sh] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<not-set, use all visible GPUs>}"
 echo "[train_ddp.sh] exp_config=${EXP_CONFIG}"
 
-# 全量 DDP 实验不应仍指向演示 stub 索引（取消 max_index_rows 不会自动换索引表）
+# 全量 DDP 实验不应仍指向演示 stub 索引（须 index_features_path 指向 full CSV，见 exp_full_best_ddp.yaml）
 python3 - "${EXP_CONFIG}" <<'PY' || exit 1
 import sys
 from dram2cnn.utils.config import load_experiment_config

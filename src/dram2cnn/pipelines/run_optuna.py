@@ -161,7 +161,7 @@ def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
     hpo = load_yaml(hpo_path)
     search_space = dict(hpo.get("search_space") or {})
     trial_train = dict(hpo.get("trial_train") or {})
-    metric = str(hpo.get("metric", base_cfg.get("train", {}).get("early_stop_metric", "avg_precision")))
+    metric = str(hpo.get("metric", base_cfg.get("train", {}).get("early_stop_metric", "best_f1")))
     study_name = str(hpo.get("study_name", "grid_cnn_hpo"))
     storage = hpo.get("storage")
     direction = str(hpo.get("direction", "maximize"))

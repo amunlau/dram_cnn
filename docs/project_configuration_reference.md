@@ -370,19 +370,19 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 ### 7.2 早停：`patience` 与 `early_stop_metric`
 
 - `patience`：验证指标连续多少轮无提升则停。默认 `50`。  
-- `early_stop_metric`：默认 `avg_precision`（PR 曲线下面积的一种实现，即 sklearn 风格 average precision）。也可 `best_f1`、`roc_auc`、`f1_at_0p5`。
+- `early_stop_metric`：默认 **`best_f1`**（与项目 KPI / infer 阈值策略一致）。也可 `avg_precision`（PR-AUC，阈值无关）、`roc_auc`、`f1_at_0p5`。
 
 **关键心智模型**（避免误读日志）：
 
 - 日志中的 **`best_f1` 列**始终表示「在验证集上对概率做阈值搜索后的最优 F1」，**不是**早停指标本身，除非你把 `early_stop_metric` 设为 `best_f1`。  
 - `f1@0.5` 是固定 0.5 阈值下的 F1。  
-- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象，**不能**仅凭「很早停」推断数据泄漏。
+- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。**默认 `best_f1` 时同理**，只是优化目标为阈值搜索后的 F1。
 
 ### 7.3 `imbalance` 子树
 
 - `use_class_weight`：是否在损失里使用类别权重。  
 - `weight_scheme`：`inverse_freq` 或 `sqrt` 等，决定正类权重如何从 `neg/pos` 推导，并受 `positive_weight_cap` 限制。  
-- `focal_gamma`：默认 **`0.5`**；设为 `0` 或 `null` 时退回普通加权 CE。  
+- `focal_gamma`：**train.yaml 片段默认 `0.5`**；**推荐实验 override 为 `0.0`**（GridCNN-Deep 在默认 lr 下 + Focal 易 NaN）；设为 `0` 或 `null` 时退回普通加权 CE。  
 - `positive_oversample_factor`：默认 **2**（`exp_baseline` 覆盖为 **1**）；将每个正样本索引重复扩展，**放大** `train_virtual_len`。  
 - `use_weighted_sampler`：单机可选；DDP 下通常关闭（见 trainer 日志说明）。  
 - `sampler_positive_boost`：若启用加权采样器时的额外正类倾向。
@@ -423,7 +423,8 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 | 网格 / horizon | 继承 `data.yaml`：**spatial_heatmap** + **5min** 窗/标签 | 同左 |
 | 模型片段 | **`model_smoke.yaml`**（轻量 GridCNN） | **`model.yaml`**（完整 GridCNN-Deep） |
 | 模型张量 | **`31×128×32`**，`tabular_dim=0` | 同左 |
-| 训练预算 | `epochs=20`，`patience=6`；train/infer **关闭 DDP 与 auto_batch** | 继承 `train.yaml`（`epochs=300`）；**`num_workers=2`**；**gpu/ddp 继承 base（auto 多卡 + 80% 显存）** |
+| 训练预算 | `epochs=20`，`patience=6`；train/infer **关闭 DDP 与 auto_batch** | 继承 `train.yaml`（`epochs=300`，`patience=50`）；**`num_workers=2`**；**gpu/ddp 继承 base** |
+| 不平衡 / 早停 | **`focal_gamma=0`**，`weight_scheme=sqrt`，`cap=30`，`oversample=1`；`time_split 0.6/0.2/0.2` | **`focal_gamma=0`**，`sqrt`，`cap=30`，`oversample=2`；`time_split 0.7/0.15/0.15`；**`early_stop_metric=best_f1`**（继承 train.yaml） |
 | 典型用途 | 冒烟、CI、`autotune.sh` | 全量 preprocess/train；**须** `build_index.sh full`；仓库默认已在 overrides 指向全量索引 |
 
 **方法**：新人应先跑通 baseline，再切 full_best；切忌以为「full_best 文件名」就自动下载了天池数据。
@@ -485,7 +486,8 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 **base**：`versioned_runs=true`，`device=auto`，`run_id` 与各 `*_run_id` 为 `null`。  
 **data**：spatial 默认 **`window_seconds=label_horizon_seconds=300`（5 分钟）**；`max_index_rows`/`mcelog_max_rows` 默认 `null`；索引由 `scripts/build_index.py` 生成，演示表见 `index_stubs/`。  
 **model**：`31×128×32`，`tabular_dim=0`；GridCNN-Deep 默认 `stem_channels=64`，`backbone_channels=[64,128,256,256]`，`blocks_per_stage=2`，`use_residual=true`。  
-**train**：`batch_size=256`，`epochs=300`，`patience=50`，`num_workers=0`，`focal_gamma=0.5`，`positive_weight_cap=50`，`early_stop_metric=avg_precision`，`imbalance.positive_oversample_factor=2`；**gpu/ddp** 默认见 `base.yaml`（`exp_baseline` 用轻量 `model_smoke.yaml` 且过采样=1；`exp_full_best_ddp` 继承 base 多卡默认）。  
+**train.yaml 片段默认值**（合并前）：`batch_size=256`，`epochs=300`，`patience=50`，`early_stop_metric=best_f1`，`focal_gamma=0.5`（fragment），`positive_weight_cap=50`，`positive_oversample_factor=2`。  
+**实验合并后有效值**：`exp_baseline` / `exp_full_best_ddp` 等均 override **`focal_gamma=0`**、**`weight_scheme=sqrt`**、**`cap=30`**；baseline 另设 `patience=6`、`epochs=20`、`model_smoke`。  
 **infer**：`batch_size=512`，`mode=full`。
 
 ---
@@ -528,9 +530,9 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ### 13.2 `early_stop_metric` 如何选取「那一标量」
 
-`train.early_stop_metric` 决定「哪一个标量与训练过程中迄今最优的 `best_score` 比较」。实现上，该标量越大越好；无效时退回可比较的哨兵值，以避免首轮无法保存 checkpoint（详见 `engine/trainer.py` 与 `troubleshooting.md`）。
+`train.early_stop_metric` 决定「哪一个标量与训练过程中迄今最优的 `best_score` 比较」。实现上，该标量越大越好；无效时退回 **-1.0 哨兵**（**不会**据此保存 best checkpoint，见 `_is_valid_early_stop_score`：须 **> -0.5** 且验证概率有限）。若整轮无合法提升，rank0 仅在**最后一轮权重有限**时 fallback 落盘（详见 `troubleshooting.md`）。
 
-**默认 `avg_precision` 的配置原因**：在极度不平衡任务中，ROC-AUC 有时对「全负预测」仍不够敏感；PR 曲线更关注正类检索质量。赛题若更关心「少漏报」或「正类精度与召回的折中」，也可改为 `best_f1`，但要意识到此时早停直接受**阈值搜索**影响，与部署时是否使用同一阈值策略需一致。
+**默认 `best_f1` 的配置原因**：项目 KPI 为 F1；推理已用验证集阈值搜索（`threshold_search` → `best_threshold.json`），早停与选模与之对齐。若更关注排序能力、阈值上线后再调，可改为 **`avg_precision`**（PR-AUC，与阈值无关）。
 
 ### 13.3 为何 `best_f1` 与 `f1@0.5` 可能差距很大
 

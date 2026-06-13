@@ -35,13 +35,13 @@ Jupyter 工作流与命令行 **`scripts/*.sh`** 共用同一套配置（`config
 | 步骤 | Notebook 单元 | 说明 |
 |------|---------------|------|
 | 生成全量索引 | `full_best` → `build_index` | `bash scripts/build_index.sh full`（耗时长） |
-| 改 `index_features_path` | **已写入 YAML** | `exp_full_best_ddp.yaml` 默认指向全量 CSV；换索引时改路径并清空 processed |
+| 改 `index_features_path` | **已写入 YAML** | `exp_full_best_ddp.yaml` 默认全量 CSV；换索引时改路径并清空 processed |
 | 预检 | 全量预检单元 | 若仍指向 stub 则 **fail-fast** |
 | preprocess → evaluate | `full_best` 各步 | **`train_ddp.sh`** 多卡训练 |
 
 - 实验配置：**`exp_full_best_ddp.yaml`**（无行数截断；继承 **`ram_budget_frac=0.5`** 系统内存预算；**gpu/ddp 继承 base 默认多卡**）。
 - 产物：`runs/exp_tianchi_full_best_ddp/`。
-- **注意**：仅取消 `max_index_rows` **不会**自动切换全量索引，必须改 `index_features_path` 并清空 `data/processed`、`data/splits`。
+- **注意**：全量须 **build_index full** 且 **index 路径指向全量 CSV**（yaml 默认已配置）；仅取消 `max_index_rows` 而仍用 stub 路径会在 train/preprocess 阶段 **fail-fast**。
 
 ### Marker 与重跑
 
@@ -59,7 +59,7 @@ flowchart TD
   B -->|冒烟| C[04 冒烟单元]
   C --> D[02 特征分析]
   C --> E[03 误差分析]
-  B -->|全量| F[04 build_index full + 改 YAML]
+  B -->|全量| F[04 build_index full + 确认 index 路径]
   F --> G[04 全量流水线]
   G --> D
   G --> E

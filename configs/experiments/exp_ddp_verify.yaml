@@ -20,3 +20,7 @@ overrides:
   train:
     epochs: 2
     patience: 99
+    imbalance:
+      focal_gamma: 0.0
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0

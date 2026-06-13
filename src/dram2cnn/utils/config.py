@@ -179,7 +179,7 @@ def validate_config(cfg: Dict[str, Any]) -> None:
             )
 
     train_cfg = cfg.get("train", {})
-    esm = str(train_cfg.get("early_stop_metric", "avg_precision")).lower()
+    esm = str(train_cfg.get("early_stop_metric", "best_f1")).lower()
     if esm not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
         raise ValueError(
             "Config error: train.early_stop_metric must be one of: "

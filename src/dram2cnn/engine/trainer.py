@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Grid CNN 训练循环（单头分类、可选 Focal 与过采样）。
 
-早停指标（`train.early_stop_metric`）在验证集 AUC/PR 为 nan 或全负类时会退化为可比较的标量；
-`best_score` 自 `-inf` 起算，避免首轮无法落盘。若整轮仍无「更好」checkpoint，rank0 在结束时
-保存最后一轮权重，保证 `grid_cnn.pt` 存在供 infer 使用。详见 `docs/troubleshooting.md`。
+早停指标（`train.early_stop_metric`，默认 `best_f1`）在验证集 AUC/PR 为 nan 或全负类时会退化为 **-1.0 占位**；
+**仅当 stop_score>-0.5 且验证概率有限** 时才写入 best checkpoint。训练步 loss/grad 非有限时立即 abort。
+若整轮仍无合法 checkpoint，rank0 在结束时仅在权重有限时写入最后一轮，否则报错。详见 `docs/troubleshooting.md`。
 """
 
 from pathlib import Path
@@ -75,6 +75,25 @@ def _metrics_at_threshold(y_true, y_prob, threshold: float):
     return classification_metrics(y_true, y_pred, y_prob)
 
 
+def _state_dict_has_non_finite(state_dict: dict) -> bool:
+    for v in state_dict.values():
+        if torch.is_tensor(v) and v.is_floating_point() and not torch.isfinite(v).all():
+            return True
+    return False
+
+
+def _module_params_non_finite(module: nn.Module) -> bool:
+    for p in module.parameters():
+        if p is not None and p.data.is_floating_point() and not torch.isfinite(p.data).all():
+            return True
+    return False
+
+
+def _is_valid_early_stop_score(score: float) -> bool:
+    """占位 -1.0 表示验证指标不可用，不得据此保存 checkpoint。"""
+    return math.isfinite(score) and score > -0.5
+
+
 def _early_stop_score(
     early_stop_metric: str,
     m_at_05: dict,
@@ -82,7 +101,7 @@ def _early_stop_score(
     roc_auc_val,
     ap_val,
 ) -> float:
-    """标量越大越好；无效指标（nan / 仅一类等）时退回 -1.0，配合 best_score=-inf 保证至少首轮可落盘。"""
+    """标量越大越好；无效指标（nan / 仅一类等）时退回 -1.0。"""
     if early_stop_metric == "best_f1":
         x = float(m_best["f1"])
     elif early_stop_metric == "roc_auc":
@@ -320,7 +339,7 @@ def train_model(
     epochs = int(train_cfg.get("epochs", 300))
     patience = int(train_cfg.get("patience", 50))
     max_grad_norm = train_cfg.get("max_grad_norm", 1.0)
-    early_stop_metric = str(train_cfg.get("early_stop_metric", "avg_precision")).lower()
+    early_stop_metric = str(train_cfg.get("early_stop_metric", "best_f1")).lower()
     if early_stop_metric not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
         raise ValueError("train.early_stop_metric must be one of: best_f1, roc_auc, f1_at_0p5, avg_precision")
     if _is_main_process() and logger is not None:
@@ -361,10 +380,28 @@ def train_model(
             loss = classification_loss(logits, y, class_weight=class_w, focal_gamma=focal_gamma)
             optim.zero_grad()
             loss.backward()
+            loss_val = float(loss.detach().item())
+            if not math.isfinite(loss_val):
+                raise RuntimeError(
+                    f"Training loss is non-finite (loss={loss_val}) at epoch {ep} batch {batch_count + 1}. "
+                    "GridCNN-Deep 在 focal_gamma>0 且默认 lr 下易数值发散；请将 train.imbalance.focal_gamma 设为 0 "
+                    "或降低 train.lr 后重训。"
+                )
             if max_grad_norm is not None and float(max_grad_norm) > 0:
-                clip_grad_norm_(model.parameters(), float(max_grad_norm))
+                grad_norm = float(clip_grad_norm_(model.parameters(), float(max_grad_norm)))
+                if not math.isfinite(grad_norm):
+                    raise RuntimeError(
+                        f"Gradient norm is non-finite at epoch {ep} batch {batch_count + 1} "
+                        f"(loss={loss_val:.6f}). 请检查 focal_gamma / lr / 类别权重配置。"
+                    )
             optim.step()
-            running_loss += float(loss.detach().item())
+            base = model.module if isinstance(model, DDP) else model
+            if _module_params_non_finite(base):
+                raise RuntimeError(
+                    f"Model parameters became non-finite after optimizer step at epoch {ep} "
+                    f"batch {batch_count + 1}. 训练已中止，请调整超参后重训。"
+                )
+            running_loss += loss_val
             batch_count += 1
 
         stop_now = False
@@ -434,10 +471,15 @@ def train_model(
                         epoch_seconds,
                     )
 
-                if stop_score > best_score:
+                yprob_finite = bool(np.isfinite(np.asarray(yprob, dtype=float)).all())
+                if stop_score > best_score and _is_valid_early_stop_score(stop_score) and yprob_finite:
                     best_score = stop_score
                     bad_epochs = 0
                     state_dict = model.module.state_dict() if isinstance(model, DDP) else model.state_dict()
+                    if _state_dict_has_non_finite(state_dict):
+                        raise RuntimeError(
+                            f"Refusing to save checkpoint at epoch {ep}: state_dict contains NaN/Inf."
+                        )
                     torch.save(state_dict, ckpt)
                     dump_json(
                         run_dir / "best_val_metrics.json",
@@ -502,11 +544,17 @@ def train_model(
 
     if _is_main_process() and not ckpt.is_file():
         eval_model = model.module if isinstance(model, DDP) else model
-        torch.save(eval_model.state_dict(), ckpt)
+        state_dict = eval_model.state_dict()
+        if _state_dict_has_non_finite(state_dict):
+            raise RuntimeError(
+                "Training ended without a valid checkpoint: final weights contain NaN/Inf. "
+                "See train log for non-finite loss/grad; common fix: focal_gamma=0 for GridCNN-Deep."
+            )
+        torch.save(state_dict, ckpt)
         if logger is not None:
             logger.warning(
                 "验证早停指标未产生可比较的提升（常见于验证集无正例或 PR-AUC 为 nan）；"
-                "已写入最后一轮权重到 %s，供推理使用。",
+                "已写入最后一轮有限权重到 %s，供推理使用。",
                 ckpt,
             )
 

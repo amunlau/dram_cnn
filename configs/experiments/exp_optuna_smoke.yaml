@@ -19,4 +19,8 @@ overrides:
   train:
     epochs: 40
     patience: 8
+    imbalance:
+      focal_gamma: 0.0
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
     # gpu / ddp 继承 base.yaml 默认（auto 多卡 + 80% 显存 batch）

@@ -29,7 +29,7 @@ from dram2cnn.utils.run_layout import (
     resolve_train_run_dir,
     train_log_path,
 )
-from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub
+from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub, warn_unstable_deep_focal_combo
 from dram2cnn.utils.seed import set_seed
 from dram2cnn.utils.training_data_audit import log_dataset_health_for_train
 
@@ -56,6 +56,7 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
 
     if rank == 0:
         assert_full_best_index_not_stub(cfg, context="run_train")
+        warn_unstable_deep_focal_combo(cfg, logger)
         validate_experiment(cfg, require_splits=True)
         dump_json(run_dir / "config_snapshot.json", cfg)
         log_dataset_health_for_train(cfg, logger, root)

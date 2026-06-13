@@ -3,7 +3,7 @@
 study_name: grid_cnn_hpo
 storage: null
 direction: maximize
-metric: avg_precision  # 与 train.early_stop_metric 对齐；trial 内会写入该字段
+metric: best_f1  # 与 train.early_stop_metric 对齐；trial 内会写入该字段
 
 n_trials: 20
 timeout_seconds: null

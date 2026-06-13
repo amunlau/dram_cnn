@@ -4,7 +4,7 @@
 
 - **默认预测目标**：**未来 5 分钟**（`label_horizon_seconds=300`）；可通过配置或不同索引表对比 30 分钟、1 小时等 horizon。
 - **默认表示**（`grid_representation: spatial_heatmap`）：逻辑 **row/col 分箱** 为 **H×W=128×32**，**bankid 0–15** 为 **16 通道** + **inventory one-hot 15 通道** → **`X` 为 [N,31,128,32]**。
-- **唯一模型**：**GridCNN-Deep** 2D-CNN；超参设计空间探索见 **`configs/hpo.yaml`** + **`scripts/optuna.sh`**（Optuna）。
+- **模型**：**GridCNN-Deep**（`model.yaml`，生产/全量）；冒烟 baseline 用 **`model_smoke.yaml`**（同 C/H/W）；超参搜索见 **`configs/hpo.yaml`** + **`scripts/optuna.sh`**。
 
 细字段见 **`docs/tianchi_pipeline.md`**、**`docs/data_processing_guide.md`**。**完整操作流程见 [`docs/user_guide.md`](docs/user_guide.md)**。训练/推理读 **`data/splits/`**；**改 horizon / 索引 / 网格后须重跑 preprocess**。
 
@@ -17,7 +17,8 @@
 | **任务** | 二分类：锚点之后 horizon 内是否出现符合条件的故障工单 |
 | **输入** | **`X`** `[N,C,H,W]`，默认 **C=31** |
 | **标签** | **`y`**∈{0,1}，`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds` |
-| **模型** | **GridCNN-Deep**：Stem + 默认 4 stage 残差卷积 backbone（~19 Conv；Optuna 可搜 3～4 stage）+ MLP 头 |
+| **模型** | **GridCNN-Deep**（`model.yaml`）；冒烟 **`model_smoke.yaml`** |
+| **评估 KPI** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索，与 infer 一致） |
 
 ---
 

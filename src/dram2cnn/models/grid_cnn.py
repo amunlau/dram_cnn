@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""固定尺寸 **[N,C,H,W]** 网格上的深度 2D CNN（本项目唯一模型架构 GridCNN-Deep）。
+"""固定尺寸 **[N,C,H,W]** 网格上的深度 2D CNN（GridCNN-Deep / model_smoke 共用此架构，深度由配置决定）。
 
 ## 设计动机
 

@@ -17,6 +17,38 @@ def is_stub_index_path(path: str | Path) -> bool:
     return any(m in s for m in _STUB_MARKERS)
 
 
+def is_deep_grid_cnn(model_cfg: dict[str, Any]) -> bool:
+    """Heuristic：与 configs/model.yaml（GridCNN-Deep）对齐的深度 backbone。"""
+    return (
+        int(model_cfg.get("blocks_per_stage", 1)) >= 2
+        and int(model_cfg.get("stem_channels", 32)) >= 64
+        and len(model_cfg.get("backbone_channels") or []) >= 4
+    )
+
+
+def warn_unstable_deep_focal_combo(cfg: dict[str, Any], logger=None) -> None:
+    """GridCNN-Deep + focal_gamma>0 在默认 lr 下已知易第 2 步梯度 NaN；rank0 打 WARNING。"""
+    from dram2cnn.engine.imbalance import focal_gamma_from_cfg
+
+    model_cfg = cfg.get("model") or {}
+    train_cfg = cfg.get("train") or {}
+    imb = train_cfg.get("imbalance") or {}
+    gamma = focal_gamma_from_cfg(imb)
+    if not is_deep_grid_cnn(model_cfg) or gamma <= 0.0:
+        return
+    msg = (
+        "GridCNN-Deep（model.yaml）与 focal_gamma=%s 在默认 lr 下已知易训练发散（loss/grad NaN）。"
+        " 推荐实验（exp_baseline / exp_full_best_ddp 等）已默认 focal_gamma=0；"
+        "若仍启用 Focal，请同时降低 train.lr 并监控首轮 loss。"
+    ) % gamma
+    if logger is not None:
+        logger.warning(msg)
+    else:
+        import warnings
+
+        warnings.warn(msg, stacklevel=2)
+
+
 def assert_full_best_index_not_stub(cfg: dict[str, Any], *, context: str = "train") -> None:
     """`exp_full_best_ddp` 等全量实验不得仍指向 ~500 行演示索引。"""
     run_name = str(cfg.get("base", {}).get("run_name", ""))

@@ -43,9 +43,11 @@
 
 **注意**：本工程 **不使用** `window_days`；时间窗仅以 **`window_seconds`**（秒）配置，与 `validate_config` 一致。
 
-## 模型（`configs/model.yaml`）
+## 模型（`configs/model.yaml` / `configs/model_smoke.yaml`）
 
-- `arch: grid_cnn`（**GridCNN-Deep** 默认）
+- **`exp_baseline`**：`model_smoke.yaml`（轻量 backbone，冒烟默认）
+- **`exp_full_best_ddp` / horizon / Optuna**：`model.yaml`（GridCNN-Deep 默认）
+- `arch: grid_cnn`
 - `in_channels`、`grid_height` / `grid_width` 必须与 preprocess 写出的 `X.npy` 及 `preprocess_manifest.json` 中 `grid_shape` 一致（spatial 默认 **31×128×32**）。
 - **Backbone**：`stem_channels` + 4×(`blocks_per_stage` 卷积块 + 可选残差 + MaxPool)；默认 **blocks_per_stage=2**、**use_residual=true**，约 **19 个 Conv2d**。
 - `backbone_channels`、`conv_kernel_size`、`head_hidden`、`dropout` 等可由 Optuna 搜索（`configs/hpo.yaml`）。

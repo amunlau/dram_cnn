@@ -109,12 +109,12 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 
 | 实验 YAML | 用途 |
 |-----------|------|
-| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**time_split 0.6/0.2/0.2**；**model_smoke.yaml**；**overrides 关闭 DDP/auto_batch** |
-| `exp_full_best_ddp.yaml` | **全量 + 多卡**：取消行数截断、`num_workers=2`；**time_split 继承 data.yaml 0.7/0.15/0.15**；**gpu/ddp 继承 base 默认** |
-| `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（配合 `scripts/verify_ddp.sh`） |
-| `exp_horizon_30m.yaml` | 30 分钟预测窗；**冒烟 overrides 关闭 DDP/auto_batch**（同 baseline） |
-| `exp_horizon_1h.yaml` | 1 小时预测窗；**冒烟 overrides 关闭 DDP/auto_batch** |
-| `exp_optuna_smoke.yaml` | Optuna 超参搜索（小样本 data 截断；**完整 model.yaml**）；**gpu/ddp 继承 base 多卡默认** |
+| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**time_split 0.6/0.2/0.2**；**model_smoke.yaml**；**focal_gamma=0**；**overrides 关闭 DDP/auto_batch** |
+| `exp_full_best_ddp.yaml` | **全量 + 多卡**：全量索引路径 + 取消行数截断；**model.yaml**；**focal_gamma=0**；**time_split 0.7/0.15/0.15**；**gpu/ddp 继承 base** |
+| `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（**model.yaml** + **focal_gamma=0**） |
+| `exp_horizon_30m.yaml` | 30 分钟窗；**model.yaml**（非 baseline 的 smoke 模型）；**time_split 继承 data.yaml**；关闭 DDP |
+| `exp_horizon_1h.yaml` | 1 小时窗；**model.yaml**；**time_split 继承 data.yaml**；关闭 DDP |
+| `exp_optuna_smoke.yaml` | Optuna（**model.yaml** + **focal_gamma=0**）；小样本 data 截断 |
 
 训练/推理产物写入 `runs/<run_name>/`（见 `configs/base.yaml` 的 `run_name`）。
 
@@ -218,19 +218,16 @@ bash scripts/inspect_data.sh
 
 「全量」包含两件事，**缺一不可**：
 
-1. 取消 `max_index_rows` / `mcelog_max_rows` 截断（`exp_full_best_ddp` 已做）。
-2. 将 **`index_features_path`** 指向全量索引 CSV（**不会自动切换**）。
+1. 取消 `max_index_rows` / `mcelog_max_rows` 截断（`exp_full_best_ddp.yaml` 已做）。
+2. **`index_features_path` 指向全量索引 CSV**（仓库默认 **`exp_full_best_ddp.yaml` 已配置** `data/raw/features_index_h300s_step300s_full.csv`）。
 
 ### 推荐流程
 
 ```bash
-# 1. 生成全量索引
+# 1. 生成全量索引（若尚未 build）
 bash scripts/build_index.sh full
 
-# 2. 指定全量索引（二选一）
-#    A) 编辑 configs/data.yaml 的 index_features_path
-#    B) 在 exp_full_best_ddp.yaml 的 overrides.data 增加：
-#       index_features_path: data/raw/features_index_h300s_step300s_full.csv
+# 2. 确认全量索引路径（默认 yaml 已写好；自定义索引时改 overrides.data.index_features_path）
 
 # 3. 清空旧预处理产物（重要）
 rm -rf data/processed/* data/splits/*
@@ -463,7 +460,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 ```
 01_eda → 04 冒烟 → 02 特征分析 → 03 误差分析
                 ↓（可选）
-         04 全量（build_index full + 改 YAML + 全量单元）
+         04 全量（build_index full + 确认 index 路径 + 全量单元）
 ```
 
 修改 Python 源码后请 **Kernel → Restart** 再执行，避免缓存旧版 `dram2cnn`。

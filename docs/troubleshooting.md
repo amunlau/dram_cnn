@@ -89,9 +89,17 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 - 配置校验 **只使用 `data.window_seconds`**。  
 - **处理**：对 02/03 Notebook **先运行首格**（会 `del sys.modules` 中已加载的 `dram2cnn`），或 **Kernel → Restart** 后自上而下执行；并对 Notebook **清除输出** 避免过时的 traceback 误导。
 
+## 训练 `loss=nan` / evaluate 报 `Input contains NaN` / `y_prob` 全 NaN
+
+- **因果链**：GridCNN-Deep（`configs/model.yaml`，约 590 万参数）在 **`focal_gamma>0` + 默认 `lr=0.001`** 下，常在第 2 个 optimizer step 梯度变 NaN → checkpoint 损坏 → infer 的 `y_prob` 全 NaN → evaluate 失败。
+- **数据侧通常正常**：`data/splits/X_*.npy` 无 NaN；勿误判为 preprocess 问题。
+- **处理（全量实验）**：`exp_full_best_ddp.yaml` 已默认 `focal_gamma: 0.0`、`weight_scheme: sqrt`（与冒烟 baseline 一致）。若自行改回 Focal，须同时降低 `train.lr` 并监控首轮 loss。
+- **重跑**：删除 `runs/pipeline-logs/markers/full_best__train.done` 与 `full_best__infer.done`，再 `bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml` → infer → evaluate。
+- **代码守卫（v2）**：`trainer.py` 在 loss/grad/权重非有限时立即 abort；仅在 `early_stop_score>-0.5` 且验证概率有限时保存 best checkpoint；`evaluator.py` 对 NaN `y_prob` 给出明确报错。
+
 ## 训练结束找不到 `checkpoints/grid_cnn.pt`
 
-- 验证 PR-AUC 为 nan 时，早停逻辑可能跳过保存；`engine/trainer.py` 使用 **`best_score=-inf`**、非有限指标归一化，并在仍无文件时 **保存最后一轮权重**。若仍失败，查看该次训练日志末尾是否有 rank0 报错。
+- 验证 PR-AUC 为 nan 时，**不再**用 `-1.0` 占位分数保存 best；仅在指标有效或最后一轮权重有限时落盘。若训练发散，日志会有 `non-finite loss/grad` 或末尾 `without a valid checkpoint` 报错。
 
 ## `exp_full_best_ddp` 与演示索引
 
@@ -129,7 +137,7 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 
 ## 早停看的是哪一列？`best_f1` 与 `f1@0.5` 为何差很多？
 
-- **早停**由 `configs/train.yaml` 的 **`train.early_stop_metric`** 决定（常见为 `avg_precision`），与日志里的 **`best_f1` 列名无关**：后者始终是「验证集上 **阈值搜索** 后的 F1」；**`f1@0.5`** 是固定 0.5 阈值下的 F1。二者不同属正常现象。  
+- **早停**由 `configs/train.yaml` 的 **`train.early_stop_metric`** 决定（默认 **`best_f1`**，验证集阈值搜索后的 F1，与 infer 的 `best_threshold.json` 一致）。可选 **`avg_precision`**（阈值无关的 PR-AUC）。日志里的 **`best_f1` 列**与早停默认项同名；**`f1@0.5`** 是固定 0.5 阈值下的 F1，三者不可混为一谈。  
 - 每 epoch 日志中会额外打印 **`early_stop_metric` 的当前分数**（与 `epoch_metrics.csv` 中 `early_stop_score` 一致）；早停触发时会写明 **metric 名**、**patience** 与 **best_该指标**。  
 - 验证集 **极小**（如 `N_val` 小于 32）时，ROC-AUC / PR-AP 易在首轮即达平台，随后连续 `patience` 轮无提升会早停，**不等于**训练/验证泄漏。
 

@@ -71,7 +71,7 @@ index_build_presets:
     min_positives: 50
     min_total_rows: 500
 
-# 预处理：丢弃 mcelog 窗口无事件的样本（避免全零 X 进入训练）
+# 预处理：丢弃 mcelog 窗口无事件的负样本（y=0）；正样本空窗仍保留（manifest: n_empty_grids_kept_positive）
 drop_empty_mcelog_windows: true
 # 切分后归一化：robust=median/IQR（默认，对 log1p 后时间漂移更稳）；zscore=mean/std
 normalization_method: robust

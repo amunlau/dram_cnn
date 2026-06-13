@@ -296,9 +296,9 @@ t_min + W ≤ predict_ts ≤ t_max − H
 
 ---
 
-## 10. 下游模型：GridCNN-Deep（`configs/model.yaml`）
+## 10. 下游模型：GridCNN（`model.yaml` / `model_smoke.yaml`）
 
-预处理产出的 **`X`** 为固定尺寸 **`[N, C, H, W]`**（默认 **`[N, 31, 128, 32]`**）。本项目唯一模型 **GridCNN-Deep** 将其视为多通道「故障密度图像」，通过深度 2D 卷积提取空间模式后二分类。
+预处理产出的 **`X`** 为固定尺寸 **`[N, C, H, W]`**（默认 **`[N, 31, 128, 32]`**）。**GridCNN-Deep**（`configs/model.yaml`）将其视为多通道「故障密度图像」；**冒烟 baseline** 使用更浅的 **`model_smoke.yaml`**（同 C/H/W，参数量约 1/4）。
 
 **结构概要**（实现见 `src/dram2cnn/models/grid_cnn.py`）：
 

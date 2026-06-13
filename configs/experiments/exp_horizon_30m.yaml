@@ -22,6 +22,10 @@ overrides:
   train:
     epochs: 20
     patience: 6
+    imbalance:
+      focal_gamma: 0.0
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
     # 冒烟对比实验：关闭 DDP/auto_batch 加速；全量生产可删此段以继承 base.yaml 默认
     gpu:
       auto_batch_size: false

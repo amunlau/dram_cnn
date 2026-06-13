@@ -12,8 +12,9 @@ max_grad_norm: 1.0
 cudnn_benchmark: true
 # 当早停指标连续 `patience` 轮无提升时停止训练。
 patience: 50
-# 极不平衡：默认用验证集 PR-AUC（avg_precision）早停；也可用 best_f1；说明见 engine/imbalance.py 与本文件 imbalance 段。
-early_stop_metric: avg_precision
+# 项目 KPI 为 F1：早停与 checkpoint 选取验证集阈值搜索后的 best_f1（与 threshold_search / infer 一致）。
+# 可选 avg_precision（阈值无关排序）、roc_auc、f1_at_0p5；详见 docs/project_configuration_reference.md §7.2。
+early_stop_metric: best_f1
 
 imbalance:
   # class weight=[1, w_pos] 传入 classification_loss（加权 CE / 可选 Focal）
@@ -23,7 +24,7 @@ imbalance:
   weight_scheme: inverse_freq
   # 与 positive_oversample_factor 联用时不宜过高，避免损失梯度双重放大。
   positive_weight_cap: 50.0
-  # 配合过采样时常用 0.5～1.0；0 即普通加权 CE。
+  # fragment 默认 0.5；GridCNN-Deep（model.yaml）生产实验须 override 为 0.0（见 exp_baseline / exp_full_best_ddp）。
   focal_gamma: 0.5
   # 训练集内每个正样本在索引序列中出现次数（≥1）。数据修复后建议 2～3，勿与过高 class weight 叠加。
   positive_oversample_factor: 2
