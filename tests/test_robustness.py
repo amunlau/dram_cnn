@@ -34,3 +34,25 @@ def test_evaluate_requires_prediction_columns(tmp_path: Path) -> None:
     pred.write_text("y_true\n0\n1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="y_pred"):
         evaluate(str(pred), str(tmp_path / "metrics.json"))
+
+
+def test_evaluate_writes_deployment_and_oracle_metrics(tmp_path: Path) -> None:
+    pred = tmp_path / "predictions.csv"
+    pd.DataFrame(
+        {
+            "y_true": [0, 1, 1, 0],
+            "y_pred": [0, 1, 0, 0],
+            "y_prob": [0.2, 0.9, 0.55, 0.1],
+            "threshold": [0.78, 0.78, 0.78, 0.78],
+        }
+    ).to_csv(pred, index=False)
+    metrics_path = tmp_path / "metrics.json"
+    evaluate(str(pred), str(metrics_path))
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert payload["kpi_scope"] == "deployment"
+    assert "f1" in payload
+    assert "deployment" in payload
+    assert payload["deployment"]["threshold"] == 0.78
+    assert "oracle_on_test" in payload
+    assert payload["oracle_on_test"]["metrics"] is not None
+    assert (tmp_path / "best_threshold_on_eval.json").is_file()

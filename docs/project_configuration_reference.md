@@ -14,7 +14,7 @@
 1. **五段片段配置**（fragment）：`configs/base.yaml`、`configs/data.yaml`、`configs/model.yaml`、`configs/train.yaml`、`configs/infer.yaml`。每段只承载一类决策，便于版本管理与 Code Review。  
 2. **实验入口 YAML**（experiment）：`configs/experiments/*.yaml`。它不重复抄写全部字段，而是通过 `base:` / `data:` 等键**指向**上述片段，再用 `overrides:` **仅覆盖**本次实验需要改动的子树。
 
-这种拆法的**直接好处**是：`exp_baseline.yaml` 可以在**不修改** `data.yaml` 默认全表语义的前提下，用 `overrides.data` 强行加上「只读 500 行索引、只扫 800000 行 mcelog」等调试约束（二者须与 `index_build_presets.smoke` 一致）；而 `exp_full_best_ddp.yaml` 则可以把 `max_index_rows` / `mcelog_max_rows` 置为 `null`，表示**取消调试截断**，但仍与其它实验**共用**同一份 `data.yaml` 中的索引路径、窗口秒数、网格表示等——除非你在该实验的 `overrides` 里显式改掉它们。
+这种拆法的**直接好处**是：`exp_baseline.yaml` 可以在**不修改** `data.yaml` 默认全表语义的前提下，用 `overrides.data` 强行加上「只读 500 行索引、只扫 800000 行 mcelog」等调试约束（二者须与 `index_build_presets.smoke` 一致）；而 `exp_full_best_ddp.yaml` 则可以把 `max_index_rows` / `mcelog_max_rows` 置为 `null`，表示**取消调试截断**。**索引路径**由实验 `overrides.data.index_features_path` 分叉（baseline→stub，full_best→`data/raw/features_index_*_full.csv`）；窗口秒数、网格表示等仍继承 `data.yaml`，除非在 overrides 中显式修改。
 
 下文将按「从抽象到具体」的顺序展开：先说明**合并规则与路径解析**（否则后面读每个字段会困惑），再**逐文件、逐字段**解释含义与改法，最后给出**场景化操作清单**与**与源码模块的映射**，便于你自行追溯实现。
 
@@ -209,8 +209,8 @@
 
 **详细情况**：
 
-- 演示路径 `data/index_stubs/features_5m_index_demo.csv`：约 500 行，适合 CI 与教学。  
-- 天池全量：通常是你下载的 `features_5m_*.csv`，应放到你有权限读的路径，并改此键。
+- 演示路径 `data/index_stubs/features_5m_index_demo.csv`：约 500 行，适合 CI 与教学（`bash scripts/build_index.sh smoke` 可重建）。  
+- 全量路径：先 **`bash scripts/build_index.sh full`**，输出 `data/raw/features_index_h300s_step300s_full.csv`（`exp_full_best_ddp.yaml` 已默认指向该文件）。
 
 **方法**：修改配置后务必清空 `processed`/`splits` 并重跑 preprocess；否则训练会读取与当前配置不一致的 `X_train.npy`。
 
@@ -314,7 +314,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 - `time_stratified`（**默认**）：分层时间切分，保证各 split 至少 `min_pos_per_split` 个正例。  
 - `time`：按 `predict_ts` 排序后按比例切 train/val/test。  
-- `sid`：按唯一 `sid` 分层切分（约 **64% / 16% / 20%** train/val/test）。
+- `sid`：按唯一 `sid` 切分（比例继承 ``time_split``，默认 **70% / 15% / 15%**）；同一 sid 不跨 split；默认按 sid 是否曾出现正样本分层。
 
 `time_split` 下三个比例默认 `0.7/0.15/0.15`，和为 1；`min_pos_per_split` 默认 1。**`exp_baseline` 冒烟实验覆盖为 `0.6/0.2/0.2`**（略增大 val/test 以便早停与指标更稳）；`exp_horizon_*` / `exp_full_best_ddp` 继承 data.yaml 默认 0.7/0.15/0.15。`normalization_method` 默认 `robust`；`normalization_clip` 默认 **20**（null 不裁剪）；`drop_empty_mcelog_windows` 默认 true（仅丢弃负样本空窗）。
 
@@ -369,20 +369,20 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ### 7.2 早停：`patience` 与 `early_stop_metric`
 
-- `patience`：验证指标连续多少轮无提升则停。默认 `50`。  
+- `patience`：验证指标连续多少轮无提升则停。默认 **`50`**（冒烟实验 yaml 可覆盖为 `6` 等较小值）。  
 - `early_stop_metric`：默认 **`best_f1`**（与项目 KPI / infer 阈值策略一致）。也可 `avg_precision`（PR-AUC，阈值无关）、`roc_auc`、`f1_at_0p5`。
 
 **关键心智模型**（避免误读日志）：
 
-- 日志中的 **`best_f1` 列**始终表示「在验证集上对概率做阈值搜索后的最优 F1」，**不是**早停指标本身，除非你把 `early_stop_metric` 设为 `best_f1`。  
-- `f1@0.5` 是固定 0.5 阈值下的 F1。  
-- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。**默认 `best_f1` 时同理**，只是优化目标为阈值搜索后的 F1。
+- 日志中的 **`best_f1` 列**表示「验证集上对概率做阈值搜索后的 F1」；**默认 `early_stop_metric: best_f1` 时，早停也看同一标量**。  
+- `f1@0.5` 是固定 0.5 阈值下的 F1，与 `best_f1` 不可混读。  
+- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。
 
 ### 7.3 `imbalance` 子树
 
 - `use_class_weight`：是否在损失里使用类别权重。  
 - `weight_scheme`：`inverse_freq` 或 `sqrt` 等，决定正类权重如何从 `neg/pos` 推导，并受 `positive_weight_cap` 限制。  
-- `focal_gamma`：**train.yaml 片段默认 `0.5`**；**推荐实验 override 为 `0.0`**（GridCNN-Deep 在默认 lr 下 + Focal 易 NaN）；设为 `0` 或 `null` 时退回普通加权 CE。  
+- `focal_gamma`：**train.yaml 默认 `0.0`**（普通加权 CE）；GridCNN-Deep 在默认 lr 下 **勿** 设为 >0（易 NaN）。  
 - `positive_oversample_factor`：默认 **2**（`exp_baseline` 覆盖为 **1**）；将每个正样本索引重复扩展，**放大** `train_virtual_len`。  
 - `use_weighted_sampler`：单机可选；DDP 下通常关闭（见 trainer 日志说明）。  
 - `sampler_positive_boost`：若启用加权采样器时的额外正类倾向。
@@ -486,8 +486,8 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 **base**：`versioned_runs=true`，`device=auto`，`run_id` 与各 `*_run_id` 为 `null`。  
 **data**：spatial 默认 **`window_seconds=label_horizon_seconds=300`（5 分钟）**；`max_index_rows`/`mcelog_max_rows` 默认 `null`；索引由 `scripts/build_index.py` 生成，演示表见 `index_stubs/`。  
 **model**：`31×128×32`，`tabular_dim=0`；GridCNN-Deep 默认 `stem_channels=64`，`backbone_channels=[64,128,256,256]`，`blocks_per_stage=2`，`use_residual=true`。  
-**train.yaml 片段默认值**（合并前）：`batch_size=256`，`epochs=300`，`patience=50`，`early_stop_metric=best_f1`，`focal_gamma=0.5`（fragment），`positive_weight_cap=50`，`positive_oversample_factor=2`。  
-**实验合并后有效值**：`exp_baseline` / `exp_full_best_ddp` 等均 override **`focal_gamma=0`**、**`weight_scheme=sqrt`**、**`cap=30`**；baseline 另设 `patience=6`、`epochs=20`、`model_smoke`。  
+**train.yaml 片段默认值**（合并前）：`batch_size=256`，`epochs=300`，`patience=50`，`early_stop_metric=best_f1`，`focal_gamma=0.0`，`weight_scheme=sqrt`，`positive_weight_cap=30`，`positive_oversample_factor=2`。  
+**实验合并后有效值**：各 shipped 实验 yaml 在 imbalance 上与 fragment 一致或显式覆盖（baseline 另设 `patience=6`、`epochs=20`、`model_smoke`、`oversample=1`）。  
 **infer**：`batch_size=512`，`mode=full`。
 
 ---
@@ -578,7 +578,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ### 15.3 按服务器切分（`sid`）
 
-当同一 `sid` 的样本在时间上强相关、且你不希望「同一机器同时出现在 train 与 test」时，`sid` 切分更保守，通常使测试分数**低于**时间切分（更难）。选择哪种应在实验记录中写明，以便与论文或答辩材料对齐。
+在**唯一 sid** 上按 ``time_split`` 比例（默认 70/15/15）切分；同一 sid 的全部样本只落在一个 split。默认按 sid 是否曾出现正样本分层，使各 split 正例服务器占比接近。当同一 `sid` 的样本在时间上强相关、且你不希望「同一机器同时出现在 train 与 test」时，`sid` 切分更保守，通常使测试分数**低于**时间切分（更难）。选择哪种应在实验记录中写明，以便与论文或答辩材料对齐。
 
 ---
 
@@ -650,33 +650,16 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ---
 
-## 第二十一章 完整 Walkthrough：从「空仓库」到「可提交的一次全量实验」
+## 第二十一章 全量实验检查清单
 
-本章用**叙事体**把配置变更串成一条时间线，便于你照抄检查清单。假设你已在 `data/raw/` 放好天池提供的 `mcelog.csv`、`trouble_tickets.csv`、`inventory.csv`，并已执行 **`bash scripts/build_index.sh full`** 生成全量索引（例如 `data/raw/features_index_h300s_step300s_full.csv`）。
+逐步命令与脚本说明见 **[`user_guide.md` §6](./user_guide.md)**。以下为配置层面的核对项（假设 `data/raw/` 已放置 mcelog / tickets / inventory）：
 
-**第 1 步：选择实验入口**  
-决定本次产物写入 `runs/exp_tianchi_full_best_ddp/`（或你自定义的 `run_name`）。若沿用仓库文件，则实验 yaml 为 `configs/experiments/exp_full_best_ddp.yaml`。若你希望保留原 `run_name` 语义但改目录名，可在 `overrides.base.run_name` 写新字符串——注意这会改变 `runs/` 下文件夹名，所有后续脚本必须仍指向**同一份**实验 yaml。
-
-**第 2 步：确认全量索引路径**  
-仓库默认的 `exp_full_best_ddp.yaml` 已在 `overrides.data.index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（须先 **`bash scripts/build_index.sh full`** 生成该文件）。若使用自定义实验 yaml，请显式设置该键；baseline 仍指向演示 stub 以便并行冒烟。
-
-**第 3 步：确认截断开关**  
-在 full_best 实验中，`max_index_rows` 与 `mcelog_max_rows` 应为 `null`。若你误把 baseline 的 `500`/`800000` 复制过来，会在全表上仍只读 500 行索引——这是典型的「复制粘贴 overrides」错误。
-
-**第 4 步：清理预处理产物**  
-删除 `data/processed` 与 `data/splits` 下全部生成文件，或删除流水线 marker。否则 preprocess 可能被跳过，训练会读取与当前配置不一致的 `npy`。
-
-**第 5 步：预处理与校验**  
-执行 `bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml`，完成后检查 `preprocess_manifest.json` 中的样本数是否与索引行数（在截断为 null 时）一致、`pos_rate` 是否合理。随后 `bash scripts/validate.sh ...` 确认 `X_train` 形状与 `model.yaml` 一致。
-
-**第 6 步：训练并阅读 rank0 日志**  
-使用 `scripts/train_ddp.sh` 或单卡 `train.sh`。日志开头应出现**数据摘要**：若仍提示 stub 路径，说明合并后的 `index_features_path` 未改成功，应回到第 2 步排查是否改错文件或改错实验 yaml。训练过程中观察 `early_stop_metric` 打印列是否与你的预期一致。
-
-**第 7 步：推理与评估**  
-不改实验 yaml 的前提下跑 `infer` 与 `evaluate`，确认 `predictions.csv` 与 `metrics.json` 落盘路径。若需对比多次推理，依赖 `versioned_runs` 与指针文件，而不是手工移动 csv。
-
-**第 8 步：实验记录（强烈建议）**  
-在实验笔记中记录：**合并后** `index_features_path` 的绝对路径、`preprocess_manifest` 的哈希或关键字段、`git commit`、训练 `run` 子目录名、以及 `train.early_stop_metric`。这八步能把「可复现」从口号落实为可操作习惯。
+1. **实验入口**：`configs/experiments/exp_full_best_ddp.yaml`（或自定义 `run_name` 的等价 yaml）。  
+2. **全量索引**：已执行 `bash scripts/build_index.sh full`；`index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（非 stub）。  
+3. **截断开关**：`max_index_rows` 与 `mcelog_max_rows` 为 `null`。  
+4. **清理产物**：删除 `data/processed/*`、`data/splits/*` 及 preprocess marker。  
+5. **预处理 → 训练 → 推理 → 评估**：`preprocess.sh` → `train_ddp.sh` → `infer.sh` → `evaluate.sh`；infer 会自动比对 `config_snapshot.json`。  
+6. **指标口径**：部署 KPI 看 `metrics.json`（val 阈值）；`best_threshold_on_eval.json` 仅为测试集事后分析。
 
 ---
 

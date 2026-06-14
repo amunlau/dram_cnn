@@ -109,11 +109,13 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 
 | 实验 YAML | 用途 |
 |-----------|------|
-| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行、mcelog 截断 **800000** 行、20 epoch；**time_split 0.6/0.2/0.2**；**model_smoke.yaml**；**focal_gamma=0**；**overrides 关闭 DDP/auto_batch** |
-| `exp_full_best_ddp.yaml` | **全量 + 多卡**：全量索引路径 + 取消行数截断；**model.yaml**；**focal_gamma=0**；**time_split 0.7/0.15/0.15**；**gpu/ddp 继承 base** |
+| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行；产物 **`data/processed_smoke/`、`data/splits_smoke/`**（与全量 `processed/` 隔离，可并行保留全量数据）；**overrides 关闭 DDP/auto_batch** |
+| `exp_full_best_ddp.yaml` | **全量 + 多卡**：全量索引路径 + 取消行数截断；**model.yaml**；**time_stratified**；**time_split 0.7/0.15/0.15**；**gpu/ddp 继承 base** |
+| `exp_full_best_sid.yaml` | **全量 + sid 切分**（跨服务器泛化）：与 full_best 共用 `data/processed/`；**splits → `data/splits_sid/`**；训练产物 `runs/exp_tianchi_full_best_sid/` |
+| `exp_baseline_sid.yaml` | 冒烟 + **sid 切分**（`processed_smoke/` + `splits_sid_smoke/`）；快速验证 sid 流水线 |
 | `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（**model.yaml** + **focal_gamma=0**） |
-| `exp_horizon_30m.yaml` | 30 分钟窗；**model.yaml**（非 baseline 的 smoke 模型）；**time_split 继承 data.yaml**；关闭 DDP |
-| `exp_horizon_1h.yaml` | 1 小时窗；**model.yaml**；**time_split 继承 data.yaml**；关闭 DDP |
+| `exp_horizon_30m.yaml` | 30 分钟窗；**model.yaml**；**time_split / oversample 继承 data.yaml + train.yaml**（oversample 默认 2）；关闭 DDP |
+| `exp_horizon_1h.yaml` | 1 小时窗；**model.yaml**；**time_split / oversample 继承 data.yaml + train.yaml**；关闭 DDP |
 | `exp_optuna_smoke.yaml` | Optuna（**model.yaml** + **focal_gamma=0**）；小样本 data 截断 |
 
 训练/推理产物写入 `runs/<run_name>/`（见 `configs/base.yaml` 的 `run_name`）。
@@ -194,7 +196,7 @@ bash scripts/infer.sh configs/experiments/exp_baseline.yaml
 bash scripts/evaluate.sh configs/experiments/exp_baseline.yaml
 ```
 
-产出同目录下 `metrics.json`、PR 曲线、混淆矩阵等。
+产出同目录下 `metrics.json`（**部署 KPI**，顶层字段）、`oracle_on_test` 段（测试集事后分析）、PR 曲线、混淆矩阵等。
 
 ### 一键冒烟（上述 1～5 串联，preprocess 已含步骤 2 的 validate）
 
@@ -247,6 +249,24 @@ bash scripts/evaluate.sh configs/experiments/exp_full_best_ddp.yaml
 ```
 
 训练启动时 rank0 会打印**数据摘要**；若仍提示 stub 路径，说明 `index_features_path` 未改成功。
+
+### 6.1 按 sid 切分（跨服务器泛化评估）
+
+默认 `time_stratified` 允许同一台服务器（sid）的样本同时出现在 train 与 test，指标可能**高估**跨机泛化。`exp_full_best_sid.yaml` 使用 **`split_strategy: sid`**：在**唯一 sid** 上按与 `time_split` 相同的比例（默认 **70/15/15**）切分，并按 sid 是否曾出现正样本分层；产物写入 **`data/splits_sid/`**，训练 run 名为 **`exp_tianchi_full_best_sid`**。
+
+在已完成 **`exp_full_best_ddp` 全量 preprocess**（`data/processed/` 已就绪）后，可**只重切分**，避免重复扫描 mcelog：
+
+```bash
+bash scripts/resplit.sh configs/experiments/exp_full_best_sid.yaml
+bash scripts/train_ddp.sh configs/experiments/exp_full_best_sid.yaml
+bash scripts/infer.sh configs/experiments/exp_full_best_sid.yaml
+bash scripts/evaluate.sh configs/experiments/exp_full_best_sid.yaml
+```
+
+切分摘要（各 split 样本数、sid 数、空 mcelog 窗计数）见 **`data/splits_sid/split_manifest.json`**。  
+冒烟 sid 链路：`exp_baseline_sid.yaml` + 同上命令（单卡 `train.sh` 即可）。
+
+**指标口径**：`metrics.json` **顶层字段 = 部署 KPI**（infer 使用的验证集阈值）；`oracle_on_test` 为测试集事后最优阈值，**不可**当作线上性能。详见 **`03_error_analysis.ipynb`**。
 
 ---
 
@@ -406,9 +426,9 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_best_d
 
 ---
 
-## 12. Notebook 工作流（含冒烟 / 全量）
+## 12. Notebook 工作流（含冒烟 / 全量 time / 全量 sid）
 
-Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run_pipelines.ipynb`** 为主。详见 [`notebooks/README.md`](../notebooks/README.md)。
+Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流程对照表与 mermaid 图见 [`notebooks/README.md`](../notebooks/README.md)**，本节仅保留命令行侧要点。
 
 ### 12.1 文件职责
 
@@ -417,7 +437,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 | `01_eda.ipynb` | raw 表 + 索引列概览 | 冒烟/全量**前** |
 | `02_feature_analysis.ipynb` | preprocess 后 `X` 统计 | **preprocess 后** |
 | `03_error_analysis.ipynb` | `predictions.csv` FP/FN | **infer 后** |
-| **`04_run_pipelines.ipynb`** | **冒烟 + 全量**端到端（marker 续跑） | 环境验证 / 正式训练 |
+| **`04_run_pipelines.ipynb`** | **冒烟 + 全量 time + 全量 sid** 端到端（marker 续跑） | 环境验证 / 正式训练 / **泛化对比** |
 
 ### 12.2 冒烟测试（Notebook）
 
@@ -449,18 +469,34 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 - 多卡前在终端或 Notebook 外设置：`export CUDA_VISIBLE_DEVICES=0,1,2`。
 - 产物：`runs/exp_tianchi_full_best_ddp/`。
 
-### 12.4 断点续跑与重跑
+### 12.4 全量 sid 泛化（Notebook）
+
+在同一 Notebook 的 **「全量 sid」** 小节（需 **§12.3 全量 preprocess 已完成**）：
+
+| 步骤 | 操作 |
+|------|------|
+| 1 | 确认 `data/processed/preprocess_manifest.json` 存在 |
+| 2 | 运行 **sid 1/2** 单元：`resplit.sh` → `train_ddp` → `infer` → `evaluate` |
+| 3 | 运行 **sid 2/2** 单元：对比 time vs sid **deployment F1** → `outputs/tables/full_best_time_vs_sid_deployment_kpi.csv` |
+
+- 配置：**`exp_full_best_sid.yaml`** → `data/splits_sid/`；产物：`runs/exp_tianchi_full_best_sid/`。
+- 命令行等价：**§6.1** / `bash scripts/resplit.sh configs/experiments/exp_full_best_sid.yaml`。
+- 误差分析：`03_error_analysis.ipynb`，`EXP_YAML=exp_full_best_sid.yaml`。
+
+### 12.5 断点续跑与重跑
 
 - 每步成功会写 `runs/pipeline-logs/markers/<exp>__<step>.done`；重跑该单元时自动 **SKIP** 已完成步。
-- 仅重跑冒烟：`clear_exp_markers("smoke")`；仅重跑全量：`clear_exp_markers("full_best")`。
-- 改 horizon / 索引 / 网格：清空 processed/splits + 删除 **preprocess** marker。
+- 仅重跑冒烟：`clear_exp_markers("smoke")`；仅重跑全量 time：`clear_exp_markers("full_best")`；仅重跑 sid：`clear_exp_markers("full_sid")`。
+- 改 horizon / 索引 / 网格：清空 processed 与各 `splits*` + 删除 **preprocess** marker。
 
-### 12.5 推荐顺序
+### 12.6 推荐顺序
 
 ```
 01_eda → 04 冒烟 → 02 特征分析 → 03 误差分析
                 ↓（可选）
-         04 全量（build_index full + 确认 index 路径 + 全量单元）
+         04 全量 time（build_index full + 全量单元）
+                ↓（跨机泛化对比）
+         04 全量 sid（resplit + 训练；不重复 preprocess）
 ```
 
 修改 Python 源码后请 **Kernel → Restart** 再执行，避免缓存旧版 `dram2cnn`。
@@ -471,7 +507,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；交互式入口以 **`04_run
 
 1. **30 分钟**：终端 `bash scripts/autotune.sh`，或在 **`04_run_pipelines.ipynb` 冒烟单元** 跑通 → 浏览 `runs/exp_tianchi_baseline/`。
 2. **1 小时**：读 [`tianchi_pipeline.md`](tianchi_pipeline.md) + 手动跑一遍 §5 分步命令（或与 Notebook 冒烟对照）。
-3. **半天**：Notebook **全量单元** 或 §6 命令行：全量索引 + `exp_full_best_ddp` + DDP。
+3. **半天**：Notebook **全量 time 单元** 或 §6 命令行：`exp_full_best_ddp` + DDP；需 sid 对比时继续 **§6.1 / 04 sid 单元**。
 4. **深入**：[`data_processing_guide.md`](data_processing_guide.md) + [`project_configuration_reference.md`](project_configuration_reference.md)。
 
 ---

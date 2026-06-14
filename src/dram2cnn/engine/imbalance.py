@@ -33,8 +33,9 @@ import torch
 
 # 与 configs/train.yaml 默认一致；实验 yaml 未覆盖 imbalance 子键时作 fallback。
 DEFAULT_POSITIVE_OVERSAMPLE_FACTOR = 2
-DEFAULT_POSITIVE_WEIGHT_CAP = 50.0
-DEFAULT_FOCAL_GAMMA = 0.5
+DEFAULT_POSITIVE_WEIGHT_CAP = 30.0
+DEFAULT_FOCAL_GAMMA = 0.0
+DEFAULT_WEIGHT_SCHEME = "sqrt"
 
 
 def positive_oversample_factor_from_cfg(imb_cfg: dict[str, Any]) -> int:
@@ -81,7 +82,7 @@ def compute_class_weights_tensor(y_np: np.ndarray, imb_cfg: dict[str, Any]) -> t
         ``train.imbalance`` 字典；关键键：
 
         - ``weight_scheme``: ``inverse_freq`` | ``sqrt`` — 由 ``neg/pos`` 推导 ``w_pos`` 的主模式；
-        - ``positive_weight_cap``: 对 ``w_pos`` 的上限；``null`` 表示不裁剪（慎用，易不稳定）。默认 **50.0**（与 ``configs/train.yaml`` 一致）。
+        - ``positive_weight_cap``: 对 ``w_pos`` 的上限；``null`` 表示不裁剪（慎用，易不稳定）。默认 **30.0**（与 ``configs/train.yaml`` 一致）。
     """
     y_flat = np.asarray(y_np).reshape(-1)
     pos = float((y_flat == 1).sum())
@@ -93,7 +94,7 @@ def compute_class_weights_tensor(y_np: np.ndarray, imb_cfg: dict[str, Any]) -> t
         return torch.tensor([1.0, 1.0], dtype=torch.float32)
 
     ratio = neg / pos
-    scheme = str(imb_cfg.get("weight_scheme", "inverse_freq")).lower().strip()
+    scheme = str(imb_cfg.get("weight_scheme", DEFAULT_WEIGHT_SCHEME)).lower().strip()
     cap_raw = imb_cfg.get("positive_weight_cap", DEFAULT_POSITIVE_WEIGHT_CAP)
     cap = float(cap_raw) if cap_raw is not None else None
 

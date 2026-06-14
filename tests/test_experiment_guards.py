@@ -1,15 +1,20 @@
 from pathlib import Path
 
+import json
+
 import pytest
+import torch
 
 from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_experiment_config
 from dram2cnn.utils.experiment_guards import (
+    assert_checkpoint_matches_experiment,
     assert_full_best_index_not_stub,
     assert_predictions_match_experiment,
     assert_processed_matches_experiment,
     is_stub_index_path,
     splits_match_processed,
+    state_dict_has_non_finite,
 )
 
 
@@ -125,3 +130,34 @@ def test_splits_match_processed_row_count(tmp_path: Path) -> None:
     assert splits_match_processed(cfg, tmp_path) is True
     np.save(spl / "y_test.npy", np.zeros(2, dtype=np.int64))
     assert splits_match_processed(cfg, tmp_path) is False
+
+
+def test_state_dict_has_non_finite() -> None:
+    ok = {"w": torch.tensor([1.0, 2.0])}
+    bad = {"w": torch.tensor([1.0, float("nan")])}
+    assert state_dict_has_non_finite(ok) is False
+    assert state_dict_has_non_finite(bad) is True
+
+
+def test_assert_checkpoint_matches_experiment_ok(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    model = {"arch": "grid_cnn", "in_channels": 31, "grid_height": 128, "grid_width": 32}
+    (run_dir / "config_snapshot.json").write_text(
+        json.dumps({"model": model, "base": {"run_name": "exp_a"}}),
+        encoding="utf-8",
+    )
+    cfg = {"model": model, "base": {"run_name": "exp_a"}}
+    assert_checkpoint_matches_experiment(cfg, run_dir, tmp_path)
+
+
+def test_assert_checkpoint_matches_experiment_mismatch(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "config_snapshot.json").write_text(
+        json.dumps({"model": {"in_channels": 31}, "base": {"run_name": "exp_a"}}),
+        encoding="utf-8",
+    )
+    cfg = {"model": {"in_channels": 16}, "base": {"run_name": "exp_b"}}
+    with pytest.raises(RuntimeError, match="model 配置不一致"):
+        assert_checkpoint_matches_experiment(cfg, run_dir, tmp_path)

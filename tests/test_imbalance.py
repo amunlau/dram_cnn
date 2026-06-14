@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from dram2cnn.data.dataset import IndexMappedDataset
@@ -100,11 +101,11 @@ def test_per_sample_weights_shape_and_positive_heavier():
 
 
 def test_imbalance_cfg_fallbacks_match_train_yaml_defaults():
-    """空 imb_cfg 时 fallback 须与 configs/train.yaml 默认一致。"""
+    """空 imb_cfg 时 fallback 须与 configs/train.yaml 默认一致（sqrt + cap=30）。"""
     assert positive_oversample_factor_from_cfg({}) == DEFAULT_POSITIVE_OVERSAMPLE_FACTOR
     assert focal_gamma_from_cfg({}) == DEFAULT_FOCAL_GAMMA
     w = compute_class_weights_tensor(
         np.array([0, 0, 1], dtype=np.int64),
         {},
     )
-    assert float(w[1]) == min(2.0, DEFAULT_POSITIVE_WEIGHT_CAP)
+    assert float(w[1]) == pytest.approx(min(float(np.sqrt(2.0)), DEFAULT_POSITIVE_WEIGHT_CAP))

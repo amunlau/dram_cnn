@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-"""实验语义守卫：全量训练误用 stub 索引、evaluate 与 infer 产物不一致等。"""
+"""实验语义守卫：索引 stub、checkpoint 与配置一致性、evaluate/infer 产物对齐等。"""
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
+import torch
+
 from dram2cnn.utils.config import project_root as repo_root
+
+# 影响网络结构与输入形状的 model 键；infer 前与 config_snapshot 比对。
+_CHECKPOINT_MODEL_KEYS = (
+    "arch",
+    "in_channels",
+    "grid_height",
+    "grid_width",
+    "num_classes",
+    "tabular_dim",
+    "stem_channels",
+    "backbone_channels",
+    "blocks_per_stage",
+    "use_residual",
+    "head_hidden",
+    "dropout",
+)
 
 
 _STUB_MARKERS = ("index_stubs", "features_5m_index_demo")
@@ -121,6 +140,54 @@ def assert_processed_matches_experiment(
         data_cfg=cfg.get("data"),
         project_root_path=base,
     )
+
+
+def state_dict_has_non_finite(state_dict: dict) -> bool:
+    """checkpoint ``state_dict`` 是否含 NaN/Inf 浮点权重。"""
+    for v in state_dict.values():
+        if torch.is_tensor(v) and v.is_floating_point() and not torch.isfinite(v).all():
+            return True
+    return False
+
+
+def assert_checkpoint_matches_experiment(
+    cfg: dict[str, Any],
+    ckpt_dir: Path,
+    root: Path | None = None,
+) -> None:
+    """infer 前比对训练目录 ``config_snapshot.json`` 与当前实验 ``model`` 段是否一致。
+
+    缺 snapshot 时仅 WARNING（兼容旧 run）；存在 snapshot 且 model 键不一致则 fail-fast。
+    """
+    base = root or repo_root()
+    ckpt_dir = ckpt_dir if ckpt_dir.is_absolute() else (base / ckpt_dir).resolve()
+    snap_p = ckpt_dir / "config_snapshot.json"
+    if not snap_p.is_file():
+        warnings.warn(
+            f"checkpoint 目录缺少 config_snapshot.json（{ckpt_dir}）；"
+            "无法校验 model 配置是否与当前实验 YAML 一致。建议对当前实验重训。",
+            stacklevel=2,
+        )
+        return
+
+    snap = json.loads(snap_p.read_text(encoding="utf-8"))
+    saved_model = snap.get("model") or {}
+    current_model = cfg.get("model") or {}
+    mismatches: list[str] = []
+    for key in _CHECKPOINT_MODEL_KEYS:
+        saved_val = saved_model.get(key)
+        current_val = current_model.get(key)
+        if saved_val != current_val:
+            mismatches.append(f"  {key}: snapshot={saved_val!r} != current={current_val!r}")
+    if mismatches:
+        run_saved = (snap.get("base") or {}).get("run_name")
+        run_current = (cfg.get("base") or {}).get("run_name")
+        raise RuntimeError(
+            "checkpoint 与当前实验 model 配置不一致，拒绝 infer。\n"
+            + "\n".join(mismatches)
+            + f"\n  run_name: snapshot={run_saved!r} current={run_current!r}\n"
+            "请使用生成该 checkpoint 的实验 YAML，或设置 base.checkpoint_run_id 指向匹配的训练会话后重训。"
+        )
 
 
 def splits_match_processed(cfg: dict[str, Any], root: Path | None = None) -> bool:

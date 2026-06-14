@@ -24,6 +24,7 @@ from dram2cnn.data.dataset import NpyTensorDataset
 from dram2cnn.models.factory import build_model
 from dram2cnn.utils.device import resolve_device
 from dram2cnn.utils.io import dump_json
+from dram2cnn.utils.experiment_guards import state_dict_has_non_finite
 from dram2cnn.utils.model_shape import validate_model_input_shape
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,14 @@ def predict(model_cfg: dict, infer_cfg: dict, ckpt_path: str, splits_dir: str, o
     )
 
     model = build_model(model_cfg).to(dev)
-    model.load_state_dict(_load_checkpoint_state(ckpt, dev))
+    state = _load_checkpoint_state(ckpt, dev)
+    if state_dict_has_non_finite(state):
+        raise ValueError(
+            f"Checkpoint 含 NaN/Inf 权重: {ckpt}。"
+            "常见原因：GridCNN-Deep + focal_gamma>0 + 默认 lr 导致训练发散。"
+            "请将 train.imbalance.focal_gamma 设为 0 后重训。"
+        )
+    model.load_state_dict(state)
     if ddp_enabled:
         model = DDP(model, device_ids=[local_rank] if use_cuda else None)
     model.eval()
@@ -223,6 +231,13 @@ def predict(model_cfg: dict, infer_cfg: dict, ckpt_path: str, splits_dir: str, o
     out.to_csv(out_path, index=False)
 
     y_prob_np = np.asarray(yprob, dtype=np.float64)
+    if n > 0 and not np.isfinite(y_prob_np).all():
+        n_bad = int(np.sum(~np.isfinite(y_prob_np)))
+        raise ValueError(
+            f"推理 y_prob 含 {n_bad}/{n} 个非有限值；checkpoint 可能已数值崩溃。"
+            "请检查训练日志并重训（GridCNN-Deep 建议 focal_gamma=0）。"
+        )
+
     dump_json(
         infer_artifact_dir / "predictions_manifest.json",
         {

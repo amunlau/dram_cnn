@@ -17,7 +17,9 @@
   - **`legacy_rc_et`**：典型 **`C=3`**（read/scrub/type0），**H/W** 由 `grid_max_*` 与 `model.grid_*` 限制
 - **`tabular.npy`**：`float32`，`[N, F]`，**仅当**配置写出时存在。默认 **`spatial_heatmap` + `inventory_as_grid_channels: true`** 时 **不产生** `tabular.npy`（inventory 已拼入 **`X`** 通道；缺 inventory 时对应通道为 0）。legacy 或 spatial+独立 tabular 时常为 **`F=15`**。
 - **`y.npy`**：`int64`，`[N]`
-- **`meta.csv`**：`sid`, `predict_time`（1970 起算展示）, `label`, `predict_ts`（相对秒，≥ 0）
+- **`meta.csv`**：`sid`, `predict_time`, `label`, `predict_ts`, **`empty_mcelog_window`**（1=特征窗内无 mcelog 事件）
+- **`meta_{train,val,test}.csv`**：切分后的 meta 子集（含 `empty_mcelog_window`）
+- **`split_manifest.json`**（在 `splits_dir/`）：`split_strategy`、各 split 样本数 / sid 数 / 空窗计数
 - **`preprocess_manifest.json`**：`grid_shape`、`schema`、`n_samples`、`pos_rate`、`drop_empty_mcelog_windows`、`n_empty_grids`（填网格时检测到的空窗数）、`n_empty_grids_dropped`（丢弃的负样本空窗数）、`n_empty_grids_kept_positive`（保留的正样本空窗数）、`index_features_path`、`window_seconds`、`label_horizon_seconds`、`time_axis`、`time_epoch_offset_absolute`、`mcelog_max_rows`、spatial 分箱与并行开关等
 - **索引 sidecar**（`*.csv.stats.json`）：与 manifest 对齐的 `time_epoch_offset_absolute`、`mcelog_scan_rows`；preprocess 会校验二者与当前配置一致
 

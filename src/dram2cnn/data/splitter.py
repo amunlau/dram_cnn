@@ -4,7 +4,7 @@ from __future__ import annotations
 
 默认 **`split_by_time_stratified`**：按时间排序后分配样本，并保证各 split 至少含 `min_pos_per_split` 个正例。
 **`split_by_time`**：纯时间序切分（无标签分层）。
-**`split_by_sid`**：按服务器 ID 分层划分（需样本量足够）。
+**`split_by_sid`**：按唯一 sid 切分（比例继承 `time_split`）；同一 sid 不跨 split；默认按 sid 级正例分层。
 
 归一化默认 **`robust`**（median / IQR，对 log1p 后长尾更稳）；可选 `zscore`。
 大数组路径使用 memmap + 按通道拟合/应用，降低 split/normalize 峰值内存。
@@ -358,16 +358,24 @@ def _write_splits_and_normalize(
 def split_by_sid(
     processed_dir: str,
     splits_dir: str,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
     random_state: int = 42,
     *,
+    stratify_sid_label: bool = True,
     normalization_method: str | None = "robust",
     normalization_clip: float | None = 20.0,
 ) -> None:
-    """按 **sid** 划分 train/val/test（固定比例约 64% / 16% / 20%），再归一化。
+    """按 **sid** 划分 train/val/test，再归一化。
 
-    先对唯一 sid 做 80/20 分出 test，再对剩余 sid 做 80/20 分出 val，等价于 sid 级 64/16/20。
-    同一 sid 的全部样本只落在一个 split 中。
+    在**唯一 sid** 集合上按 ``train_ratio/val_ratio/test_ratio`` 切分（默认与 ``time_split`` 一致 70/15/15），
+    同一 sid 的全部样本只落在一个 split 中。默认按 sid 是否曾出现正样本（``label.max``）分层，
+    使各 split 的正例服务器占比接近，便于与 ``time_stratified`` 公平对比。
     """
+    if round(train_ratio + val_ratio + test_ratio, 5) != 1.0:
+        raise ValueError("train/val/test ratios must sum to 1.0")
+
     pdir = Path(processed_dir)
     X, y, meta, tab = _load_processed_arrays(pdir)
 
@@ -377,8 +385,35 @@ def split_by_sid(
             f"split_by_sid 需要至少 5 个唯一 sid（当前 {len(sids)} 个）。"
             "样本过少时请改用 configs 中 split_strategy: time_stratified。"
         )
-    train_sid, test_sid = train_test_split(sids, test_size=0.2, random_state=random_state)
-    train_sid, val_sid = train_test_split(train_sid, test_size=0.2, random_state=random_state)
+
+    sid_has_pos = meta.groupby("sid")["label"].max()
+
+    def _sid_stratify(sid_arr: np.ndarray) -> np.ndarray | None:
+        if not stratify_sid_label:
+            return None
+        labels = sid_has_pos.reindex(sid_arr).fillna(0).astype(int).to_numpy()
+        if len(np.unique(labels)) < 2:
+            return None
+        return labels
+
+    def _split_sid_groups(
+        sid_arr: np.ndarray, test_size: float, rs: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        strat = _sid_stratify(sid_arr)
+        if strat is not None:
+            try:
+                a, b = train_test_split(
+                    sid_arr, test_size=test_size, random_state=rs, stratify=strat
+                )
+                return np.asarray(a, dtype=object), np.asarray(b, dtype=object)
+            except ValueError:
+                pass
+        a, b = train_test_split(sid_arr, test_size=test_size, random_state=rs)
+        return np.asarray(a, dtype=object), np.asarray(b, dtype=object)
+
+    train_val_sid, test_sid = _split_sid_groups(sids, test_ratio, random_state)
+    val_rel = val_ratio / (train_ratio + val_ratio)
+    train_sid, val_sid = _split_sid_groups(train_val_sid, val_rel, random_state)
 
     def idx_of(sid_set):
         return meta.index[meta["sid"].isin(set(sid_set))].to_numpy()

@@ -263,7 +263,7 @@ t_min + W ≤ predict_ts ≤ t_max − H
 | `X.npy` | `float32`，形状 `[N, C, H, W]`，与 `model.yaml` 及 manifest 一致 |
 | `y.npy` | `int64`，长度 `N` |
 | `tabular.npy` | 若配置写出存在，`float32`，`[N, 15]`；spatial 且 inventory 已拼入通道时常 **不存在** |
-| `meta.csv` | 样本级元数据：`sid`，`predict_time`（1970 起算展示），`label`，`predict_ts`（相对秒 ≥ 0） |
+| `meta.csv` | 样本级元数据：`sid`，`predict_time`，`label`，`predict_ts`，**`empty_mcelog_window`**（1=特征窗内无 mcelog 事件） |
 | `preprocess_manifest.json` | **权威元数据**：`grid_shape`、`schema`、`n_samples`、`pos_rate`、`drop_empty_mcelog_windows`、`n_empty_grids`、`n_empty_grids_dropped`、`n_empty_grids_kept_positive` 等 |
 
 **注意**：修改 **`configs/data.yaml` 或 `configs/model.yaml` 中与形状相关的项** 后，务必**清空** `processed/`、`splits/` 并重跑预处理，否则后续 `validate` 或训练会报 **C/H/W 或 tabular 维不一致**。
@@ -272,7 +272,7 @@ t_min + W ≤ predict_ts ≤ t_max − H
 
 ## 8. 切分与标准化（`data/splits/`）
 
-1. **划分策略**（`split_strategy`）：默认 **`time_stratified`**——按 `predict_ts` 排序后切分，并保证 train/val/test 各含至少 `min_pos_per_split` 个正例；纯时间序用 `time`，按机器隔离用 `sid`。
+1. **划分策略**（`split_strategy`）：默认 **`time_stratified`**；纯时间序用 `time`；**跨服务器泛化**用 **`sid`**（在唯一 sid 上按 `time_split` 比例切分，默认 70/15/15；见 `exp_full_best_sid.yaml`，可 `bash scripts/resplit.sh` 在已有 `processed/` 上重切分）。切分摘要写入 **`splits_dir/split_manifest.json`**。
 2. **归一化**（`normalization_method`）：默认 **`robust`**（median / IQR，仅用 train 拟合）；可选 `zscore`。归一化后默认 **clip 到 ±`normalization_clip`**（20）。见 `splitter.normalize_split_features_by_train`。
 3. **空窗样本**（`drop_empty_mcelog_windows`，默认 true）：丢弃 **负样本** 中空 mcelog 窗行；**正样本** 即使空窗也保留（避免 rare label 因对齐丢失），manifest 记录 `n_empty_grids_dropped` / `n_empty_grids_kept_positive`。
 

@@ -874,9 +874,17 @@ def materialize_dataset(
             flush=True,
         )
 
+    # 逐样本标记：特征窗 [predict_ts−W, predict_ts) 内是否无 mcelog 事件（供误差分析 / FN 归因）
+    empty_mcelog_flags = np.zeros(n_before_drop, dtype=np.int8)
+    if empty_row_indices:
+        empty_mcelog_flags[np.asarray(empty_row_indices, dtype=np.int64)] = 1
+    if drop_empty and empty_row_indices:
+        empty_mcelog_flags = empty_mcelog_flags[keep]
+
     meta = idx_df[["sid", "predict_time"]].copy()
     meta["label"] = y.astype(np.int64)
     meta["predict_ts"] = idx_df["predict_ts"].astype(np.float64)
+    meta["empty_mcelog_window"] = empty_mcelog_flags.astype(np.int64)
 
     np.save(processed_dir / "X.npy", X)
     np.save(processed_dir / "y.npy", y)

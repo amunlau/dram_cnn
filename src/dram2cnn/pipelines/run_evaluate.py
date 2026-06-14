@@ -26,6 +26,24 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
     metrics_path = art_dir / "metrics.json"
     evaluate(str(art_dir / "predictions.csv"), str(metrics_path))
     print(f"Evaluate done: {metrics_path}")
+    try:
+        import json
+
+        payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+        dep = (payload.get("deployment") or {}).get("metrics") or payload
+        ora = (payload.get("oracle_on_test") or {}).get("metrics") or {}
+        print(
+            f"  deployment KPI: F1={dep.get('f1'):.4f} threshold={payload.get('deployment', {}).get('threshold')}"
+            if dep.get("f1") is not None
+            else "  deployment KPI: (see metrics.json)"
+        )
+        if ora.get("f1") is not None:
+            print(
+                f"  oracle_on_test (analysis only): F1={ora.get('f1'):.4f} "
+                f"threshold={payload.get('oracle_on_test', {}).get('threshold')}"
+            )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
 
 
 if __name__ == "__main__":

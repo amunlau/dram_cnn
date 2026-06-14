@@ -11,7 +11,7 @@
 | `reports/` | 可选的 Markdown / HTML 简报 |
 | `notebooks/` | 按 Notebook 名称分子目录的中间产物（若脚本中使用） |
 
-运行 `notebooks/01_eda.ipynb`、`02_feature_analysis.ipynb`、`03_error_analysis.ipynb` 后，会向上述目录写入文件。端到端流水线请用 `notebooks/04_run_pipelines.ipynb`，其主产物在 `runs/` 而非本目录。
+运行 `notebooks/01_eda.ipynb`、`02_feature_analysis.ipynb`、`03_error_analysis.ipynb` 后，会向上述目录写入文件。`04_run_pipelines.ipynb` 的 **sid 2/2** 对比单元会写入 `tables/full_best_time_vs_sid_deployment_kpi.csv`。端到端流水线主产物仍在 `runs/`。
 
 ## 与版本库同步
 

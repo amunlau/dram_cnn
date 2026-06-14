@@ -1,0 +1,41 @@
+# 冒烟 + sid 切分（快速验证 split_by_sid 与 train/infer 链路）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model_smoke.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_tianchi_baseline_sid
+  data:
+    max_index_rows: 500
+    mcelog_max_rows: 800000
+    window_seconds: 300
+    label_horizon_seconds: 300
+    label_backtrace_seconds: 300
+    grid_representation: spatial_heatmap
+    inventory_as_grid_channels: true
+    index_features_path: data/index_stubs/features_5m_index_demo.csv
+    processed_dir: data/processed_smoke
+    split_strategy: sid
+    splits_dir: data/splits_sid_smoke
+    drop_empty_mcelog_windows: true
+    normalization_method: robust
+  train:
+    epochs: 20
+    patience: 6
+    imbalance:
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
+      positive_oversample_factor: 1
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false
+  infer:
+    gpu:
+      auto_batch_size: false
+    ddp:
+      enabled: false

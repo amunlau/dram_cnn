@@ -54,3 +54,22 @@ def test_full_best_ddp_low_memory_preprocess_settings() -> None:
     assert data.get("ram_total_gib") is None
     assert cfg["train"].get("num_workers") == 2
     assert cfg["train"].get("prefetch_factor") == 2
+
+
+def test_full_best_sid_uses_sid_split_and_separate_splits_dir() -> None:
+    cfg = load_experiment_config(EXP_DIR / "exp_full_best_sid.yaml")
+    assert cfg["data"]["split_strategy"] == "sid"
+    assert cfg["data"]["splits_dir"].endswith("splits_sid")
+    assert "full" in str(cfg["data"]["index_features_path"])
+
+
+def test_baseline_uses_isolated_smoke_data_dirs() -> None:
+    cfg = load_experiment_config(EXP_DIR / "exp_baseline.yaml")
+    assert cfg["data"]["processed_dir"].endswith("processed_smoke")
+    assert cfg["data"]["splits_dir"].endswith("splits_smoke")
+
+
+def test_baseline_sid_smoke_settings() -> None:
+    cfg = load_experiment_config(EXP_DIR / "exp_baseline_sid.yaml")
+    assert cfg["data"]["split_strategy"] == "sid"
+    assert resolve_ddp_enabled(merged_scope_section(cfg, "ddp", "train").get("enabled", "auto"), "cuda", 3) is False

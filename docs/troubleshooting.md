@@ -95,7 +95,7 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 - **数据侧通常正常**：`data/splits/X_*.npy` 无 NaN；勿误判为 preprocess 问题。
 - **处理（全量实验）**：`exp_full_best_ddp.yaml` 已默认 `focal_gamma: 0.0`、`weight_scheme: sqrt`（与冒烟 baseline 一致）。若自行改回 Focal，须同时降低 `train.lr` 并监控首轮 loss。
 - **重跑**：删除 `runs/pipeline-logs/markers/full_best__train.done` 与 `full_best__infer.done`，再 `bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml` → infer → evaluate。
-- **代码守卫（v2）**：`trainer.py` 在 loss/grad/权重非有限时立即 abort；仅在 `early_stop_score>-0.5` 且验证概率有限时保存 best checkpoint；`evaluator.py` 对 NaN `y_prob` 给出明确报错。
+- **代码守卫**：`trainer.py` 在 loss/grad/权重非有限时 abort，且仅在有效早停分数时保存 best；`predictor.py` 加载 checkpoint 后校验权重有限、写出前校验 `y_prob`；`evaluator.py` 对 NaN `y_prob` 报错；`run_infer.py` 比对 `config_snapshot.json` 与当前实验 model 配置。
 
 ## 训练结束找不到 `checkpoints/grid_cnn.pt`
 

@@ -38,7 +38,7 @@ index_build:
   positive_sample_interval_seconds: 60
   # 近故障 hard-neg 区：从 ft−prefault 到 ft−H；全量 preset 覆盖为 24h
   positive_prefault_seconds: 3600
-  # 基值 0.25；smoke preset 覆盖 0.08、full preset 覆盖 0.15（bash build_index.sh smoke 实际用 preset）
+  # 仅 CLI 直调 build_index.py 且无 preset 时生效；build_index.sh 始终走 preset（smoke=0.08, full=0.15）
   target_positive_ratio: 0.25
   neg_stride_multiplier: 1
   neg_sample_strategy: uniform

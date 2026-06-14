@@ -22,7 +22,7 @@ overrides:
   train:
     imbalance:
       positive_oversample_factor: 2
-      # GridCNN-Deep（model.yaml）+ focal_gamma>0 在默认 lr 下易第 2 步梯度 NaN；与 exp_baseline 对齐更稳
+      # GridCNN-Deep 生产默认 focal_gamma=0（train.yaml）；此处显式写出便于审计
       weight_scheme: sqrt
       positive_weight_cap: 30.0
       focal_gamma: 0.0

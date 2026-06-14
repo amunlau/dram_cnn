@@ -38,6 +38,7 @@ from dram2cnn.models.factory import build_model
 from dram2cnn.models.losses import classification_loss
 from dram2cnn.utils.device import resolve_device
 from dram2cnn.utils.io import dump_json
+from dram2cnn.utils.experiment_guards import state_dict_has_non_finite
 from dram2cnn.utils.model_shape import validate_model_input_shape
 
 
@@ -55,6 +56,7 @@ def _collect_eval(model, loader, device):
                 x, y = x.to(device), y.to(device)
                 logits = model(x)
             prob = torch.softmax(logits, dim=1)[:, 1]
+            # val_predictions.csv 的 y_pred 为 argmax（诊断用）；早停/F1 与 infer 均用阈值搜索后的概率。
             pred = logits.argmax(dim=1)
             ys.extend(y.cpu().tolist())
             yp.extend(pred.cpu().tolist())
@@ -73,13 +75,6 @@ def _is_main_process() -> bool:
 def _metrics_at_threshold(y_true, y_prob, threshold: float):
     y_pred = (np.asarray(y_prob) >= float(threshold)).astype(int)
     return classification_metrics(y_true, y_pred, y_prob)
-
-
-def _state_dict_has_non_finite(state_dict: dict) -> bool:
-    for v in state_dict.values():
-        if torch.is_tensor(v) and v.is_floating_point() and not torch.isfinite(v).all():
-            return True
-    return False
 
 
 def _module_params_non_finite(module: nn.Module) -> bool:
@@ -476,7 +471,7 @@ def train_model(
                     best_score = stop_score
                     bad_epochs = 0
                     state_dict = model.module.state_dict() if isinstance(model, DDP) else model.state_dict()
-                    if _state_dict_has_non_finite(state_dict):
+                    if state_dict_has_non_finite(state_dict):
                         raise RuntimeError(
                             f"Refusing to save checkpoint at epoch {ep}: state_dict contains NaN/Inf."
                         )
@@ -545,7 +540,7 @@ def train_model(
     if _is_main_process() and not ckpt.is_file():
         eval_model = model.module if isinstance(model, DDP) else model
         state_dict = eval_model.state_dict()
-        if _state_dict_has_non_finite(state_dict):
+        if state_dict_has_non_finite(state_dict):
             raise RuntimeError(
                 "Training ended without a valid checkpoint: final weights contain NaN/Inf. "
                 "See train log for non-finite loss/grad; common fix: focal_gamma=0 for GridCNN-Deep."

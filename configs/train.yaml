@@ -10,7 +10,7 @@ prefetch_factor: 4
 max_grad_norm: 1.0
 # GPU 训练时是否启用 cuDNN autotune（吞吐更好；与「跨设备比特级完全一致」不可兼得）。
 cudnn_benchmark: true
-# 当早停指标连续 `patience` 轮无提升时停止训练。
+# 验证指标连续 `patience` 轮无提升则早停（默认 50；冒烟实验 yaml 可覆盖为更小值）。
 patience: 50
 # 项目 KPI 为 F1：早停与 checkpoint 选取验证集阈值搜索后的 best_f1（与 threshold_search / infer 一致）。
 # 可选 avg_precision（阈值无关排序）、roc_auc、f1_at_0p5；详见 docs/project_configuration_reference.md §7.2。
@@ -19,18 +19,16 @@ early_stop_metric: best_f1
 imbalance:
   # class weight=[1, w_pos] 传入 classification_loss（加权 CE / 可选 Focal）
   use_class_weight: true
-  # inverse_freq: w_pos = min(neg/pos, cap)；极端不平衡时 cap 默认 50（勿与过高 oversample 叠加）。
-  # sqrt: w_pos = min(sqrt(neg/pos), cap)；更温和（exp_baseline 使用）。
-  weight_scheme: inverse_freq
-  # 与 positive_oversample_factor 联用时不宜过高，避免损失梯度双重放大。
-  positive_weight_cap: 50.0
-  # fragment 默认 0.5；GridCNN-Deep（model.yaml）生产实验须 override 为 0.0（见 exp_baseline / exp_full_best_ddp）。
-  focal_gamma: 0.5
-  # 训练集内每个正样本在索引序列中出现次数（≥1）。数据修复后建议 2～3，勿与过高 class weight 叠加。
+  # sqrt: w_pos = min(sqrt(neg/pos), cap)；GridCNN-Deep 默认推荐（各实验 yaml 已对齐）。
+  # inverse_freq: w_pos = min(neg/pos, cap)；更激进，勿与过高 oversample 叠加。
+  weight_scheme: sqrt
+  positive_weight_cap: 30.0
+  # 0 / null = 普通加权 CE。GridCNN-Deep 在默认 lr 下 focal_gamma>0 易 NaN，生产实验保持 0。
+  focal_gamma: 0.0
+  # 训练集内每个正样本在索引序列中出现次数（≥1）。exp_baseline 覆盖为 1；全量默认 2。
   positive_oversample_factor: 2
   # 单机训练时可选：WeightedRandomSampler；DDP 下忽略（见 trainer 日志）。与过采样叠加时一般可保持 false。
   use_weighted_sampler: false
-  # 正样本在采样权重上再乘的系数（≥1 更偏向正类）。
   sampler_positive_boost: 1.0
 
 threshold_search:

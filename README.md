@@ -6,7 +6,7 @@
 - **默认表示**（`grid_representation: spatial_heatmap`）：逻辑 **row/col 分箱** 为 **H×W=128×32**，**bankid 0–15** 为 **16 通道** + **inventory one-hot 15 通道** → **`X` 为 [N,31,128,32]**。
 - **模型**：**GridCNN-Deep**（`model.yaml`，生产/全量）；冒烟 baseline 用 **`model_smoke.yaml`**（同 C/H/W）；超参搜索见 **`configs/hpo.yaml`** + **`scripts/optuna.sh`**。
 
-细字段见 **`docs/tianchi_pipeline.md`**、**`docs/data_processing_guide.md`**。**完整操作流程见 [`docs/user_guide.md`](docs/user_guide.md)**。训练/推理读 **`data/splits/`**；**改 horizon / 索引 / 网格后须重跑 preprocess**。
+细字段见 **`docs/tianchi_pipeline.md`**、**`docs/data_processing_guide.md`**。**完整操作流程见 [`docs/user_guide.md`](docs/user_guide.md)**。全量训练读 **`data/splits/`**；冒烟读 **`data/splits_smoke/`**（与全量 `processed/` 隔离）。
 
 ---
 
@@ -189,4 +189,4 @@ docker compose up --build
 
 容器内工作目录为 `/root/workspace`（挂载当前仓库），已设置 `PYTHONPATH=/root/workspace/src` 及 `OMP_NUM_THREADS=1` 等性能相关环境变量。终端内可直接运行 `bash scripts/autotune.sh` 等脚本。
 
-**Notebook**：浏览器中打开 `notebooks/04_run_pipelines.ipynb`，按 **冒烟测试 → 全量测试** 小节执行；说明见 [`notebooks/README.md`](notebooks/README.md) 与 [`docs/user_guide.md`](docs/user_guide.md) §12。
+**Notebook**：浏览器中打开 `notebooks/04_run_pipelines.ipynb`，按 **冒烟 → 全量 time → 全量 sid（可选）** 执行；说明见 [`notebooks/README.md`](notebooks/README.md) 与 [`docs/user_guide.md`](docs/user_guide.md) §6 / §12。

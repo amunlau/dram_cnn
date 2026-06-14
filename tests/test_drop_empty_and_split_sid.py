@@ -70,8 +70,10 @@ def test_drop_empty_mcelog_windows_keeps_positive(tmp_path: Path) -> None:
     }
     manifest = materialize_dataset(data_cfg, model_cfg, proc)
     y = np.load(proc / "y.npy")
+    meta = pd.read_csv(proc / "meta.csv")
     assert len(y) < 6
     assert int(y.sum()) >= 1
+    assert "empty_mcelog_window" in meta.columns
     assert manifest["drop_empty_mcelog_windows"] is True
     assert int(manifest["n_samples_before_drop"]) == 6
     assert int(manifest["n_empty_grids_dropped"]) >= 1
@@ -103,12 +105,14 @@ def test_split_by_sid_no_sid_leakage(tmp_path: Path) -> None:
     np.save(proc / "y.npy", y)
     meta.to_csv(proc / "meta.csv", index=False)
 
-    split_by_sid(str(proc), str(spl), random_state=0)
+    split_by_sid(str(proc), str(spl), random_state=0, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15)
     train_s = set(pd.read_csv(spl / "meta_train.csv")["sid"])
     val_s = set(pd.read_csv(spl / "meta_val.csv")["sid"])
     test_s = set(pd.read_csv(spl / "meta_test.csv")["sid"])
     assert train_s.isdisjoint(val_s)
     assert train_s.isdisjoint(test_s)
     assert val_s.isdisjoint(test_s)
+    n_total = len(train_s) + len(val_s) + len(test_s)
+    assert abs(len(test_s) / n_total - 0.15) < 0.08
     stats = json.loads((spl / "normalization_stats.json").read_text(encoding="utf-8"))
     assert stats.get("normalized") is True

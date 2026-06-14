@@ -22,6 +22,10 @@ from dram2cnn.engine.predictor import predict
 from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_pipeline_config, project_root
 from dram2cnn.utils.device import resolve_device
+from dram2cnn.utils.experiment_guards import (
+    assert_checkpoint_matches_experiment,
+    warn_unstable_deep_focal_combo,
+)
 from dram2cnn.utils.gpu_launch import merged_scope_section, resolve_ddp_enabled
 from dram2cnn.utils.run_layout import (
     publish_infer_session_pointer,
@@ -46,9 +50,12 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
 
     if rank == 0:
         validate_experiment(cfg, require_splits=True)
+        warn_unstable_deep_focal_combo(cfg)
 
     root = project_root()
     ckpt_dir = resolve_checkpoint_dir(root, cfg["base"])
+    if rank == 0:
+        assert_checkpoint_matches_experiment(cfg, ckpt_dir, root)
     infer_dir = resolve_infer_output_dir(root, cfg["base"])
     ckpt = ckpt_dir / "checkpoints" / "grid_cnn.pt"
     pred_csv = infer_dir / "predictions.csv"

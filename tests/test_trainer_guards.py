@@ -8,10 +8,13 @@ import torch
 from dram2cnn.engine.trainer import (
     _early_stop_score,
     _is_valid_early_stop_score,
-    _state_dict_has_non_finite,
 )
 from dram2cnn.engine.evaluator import evaluate
-from dram2cnn.utils.experiment_guards import is_deep_grid_cnn, warn_unstable_deep_focal_combo
+from dram2cnn.utils.experiment_guards import (
+    is_deep_grid_cnn,
+    state_dict_has_non_finite,
+    warn_unstable_deep_focal_combo,
+)
 
 
 def test_is_valid_early_stop_score_rejects_sentinel():
@@ -27,9 +30,9 @@ def test_early_stop_score_returns_sentinel_when_auc_missing():
 
 def test_state_dict_has_non_finite():
     sd = {"w": torch.tensor([1.0, 2.0])}
-    assert _state_dict_has_non_finite(sd) is False
+    assert state_dict_has_non_finite(sd) is False
     sd_bad = {"w": torch.tensor([1.0, float("nan")])}
-    assert _state_dict_has_non_finite(sd_bad) is True
+    assert state_dict_has_non_finite(sd_bad) is True
 
 
 def test_is_deep_grid_cnn():

@@ -3,11 +3,15 @@ from __future__ import annotations
 """模型训练命令行入口。
 
 流程概要（rank0）：
-1. `validate_experiment`：确认 `data/splits/` 与 `model.yaml` 形状一致。
-2. `train_model`：读切分张量训练 GridCNN，权重写入本次会话 `checkpoints/grid_cnn.pt`。
-3. 发布 `.latest_train_session` 等指针，供 `infer.sh` 解析最近一次训练目录。
+1. ``assert_full_best_index_not_stub``：全量实验不得误用演示索引。
+2. ``warn_unstable_deep_focal_combo``：Deep + Focal 组合预警。
+3. ``validate_experiment``：确认 ``data/splits/`` 与 ``model`` 形状一致。
+4. 写入 ``config_snapshot.json``（供 infer 比对 checkpoint 来源）。
+5. ``log_dataset_health_for_train``：打印索引路径、样本量、正负例数等摘要。
+6. ``train_model``：训练 GridCNN，权重写入 ``checkpoints/grid_cnn.pt``。
+7. 发布 ``.latest_train_session`` 等指针，供 ``infer.sh`` 解析最近一次训练目录。
 
-**分布式**：由 `torchrun` 设置 `WORLD_SIZE` / `RANK` / `LOCAL_RANK`；请使用 `bash scripts/train.sh` 启动。
+**分布式**：由 ``torchrun`` 设置 ``WORLD_SIZE`` / ``RANK`` / ``LOCAL_RANK``；请使用 ``bash scripts/train.sh`` 启动。
 """
 
 import argparse

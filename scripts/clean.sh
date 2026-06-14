@@ -32,9 +32,10 @@ echo "=== 清理 runs/（训练/推理/流水线日志）==="
 find runs -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
 mkdir -p runs/pipeline-logs/markers
 
-echo "=== 清理 data/processed/ 与 data/splits/（含 *.tmp / *.normtmp 半成品）==="
-rm -rf data/processed/* data/splits/* 2>/dev/null || true
-find data/processed data/splits -maxdepth 1 -type f \( -name '*.tmp' -o -name '*.normtmp' -o -name '*.tmp.npy' -o -name '*.normtmp.npy' \) -delete 2>/dev/null || true
+echo "=== 清理 data/processed*/ 与 data/splits*/（含 *.tmp / *.normtmp 半成品）==="
+rm -rf data/processed/* data/processed_smoke/* data/splits/* data/splits_smoke/* data/splits_sid/* data/splits_sid_smoke/* 2>/dev/null || true
+find data/processed data/processed_smoke data/splits data/splits_smoke data/splits_sid data/splits_sid_smoke -maxdepth 1 -type f \
+  \( -name '*.tmp' -o -name '*.normtmp' -o -name '*.tmp.npy' -o -name '*.normtmp.npy' \) -delete 2>/dev/null || true
 
 if [[ "${PURGE_INDEXES}" -eq 1 ]]; then
   echo "=== 清理 data/raw/ 中可再生的全量索引（保留 mcelog/tickets/inventory）==="
