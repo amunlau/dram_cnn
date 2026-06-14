@@ -3,7 +3,7 @@ batch_size: 256
 epochs: 300
 lr: 0.001
 weight_decay: 0.0001
-# DataLoader worker：0=主进程加载（调试/网络盘更稳）；全量实验见 exp_full_best_ddp（num_workers=2）
+# DataLoader worker：0=主进程加载；全量实验见 exp_full_f1_ddp / exp_full_recall_ddp（num_workers=2）
 num_workers: 0
 prefetch_factor: 4
 # 对总梯度 L2 范数裁剪；极不平衡 + 高 class weight 时建议开启（常见 1.0）。
@@ -33,8 +33,14 @@ imbalance:
 
 threshold_search:
   enabled: true
+  # objective: f1 | f_beta | recall_first | min_recall（工程「宁报勿漏」用 min_recall）
+  objective: f1
   min: 0.1
   max: 0.9
   step: 0.02
+  # min_recall / recall_first / f_beta 专用（见 threshold_profiles 与 exp_full_recall_*）
+  min_precision: 0.0
+  min_recall: 0.0
+  f_beta: 2.0
 
 # gpu / ddp 默认见 configs/base.yaml；实验 overrides.train.gpu / overrides.train.ddp 可覆盖

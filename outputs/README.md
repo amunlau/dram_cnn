@@ -9,9 +9,9 @@
 | `figures/` | Notebook 保存的图片（分布图、对比图等） |
 | `tables/` | Notebook 导出的 CSV / 汇总表 |
 | `reports/` | 可选的 Markdown / HTML 简报 |
-| `notebooks/` | 按 Notebook 名称分子目录的中间产物（若脚本中使用） |
+| `notebooks/` | 按 Notebook 名称分子目录的中间产物（若脚本中使用；**非** 源码目录 `notebooks/`） |
 
-运行 `notebooks/01_eda.ipynb`、`02_feature_analysis.ipynb`、`03_error_analysis.ipynb` 后，会向上述目录写入文件。`04_run_pipelines.ipynb` 的 **sid 2/2** 对比单元会写入 `tables/full_best_time_vs_sid_deployment_kpi.csv`。端到端流水线主产物仍在 `runs/`。
+运行 Notebook **01–03** 后写入上述目录。**04** 写入 `tables/full_f1_time_vs_sid_deployment_kpi.csv`；**05** 写入 `tables/full_recall_vs_precision_deployment_kpi.csv`；二者合并为 `tables/full_all_strategies_deployment_kpi.csv`（`python3 -m dram2cnn.utils.deployment_kpi` 或 Notebook 04/05 汇总单元）。端到端主产物仍在 `runs/`。
 
 ## 与版本库同步
 

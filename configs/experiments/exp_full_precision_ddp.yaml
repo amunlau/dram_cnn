@@ -1,0 +1,31 @@
+# 全量 + 精度优先（高精度告警；time 切分）
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_tianchi_full_precision_ddp
+  data:
+    index_features_path: data/raw/features_index_h300s_step300s_full.csv
+    max_index_rows: null
+    mcelog_max_rows: null
+    split_strategy: time_stratified
+    drop_empty_mcelog_windows: true
+    drop_empty_positive_windows: true
+    normalization_method: robust
+    time_split:
+      min_pos_per_split: 1
+    mcelog_chunk_rows: 400000
+  train:
+    early_stop_metric: avg_precision
+    imbalance:
+      positive_oversample_factor: 2
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
+    threshold_profile: precision_guard
+    num_workers: 2
+    prefetch_factor: 2

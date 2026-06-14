@@ -50,6 +50,12 @@ from dram2cnn.utils.preprocess_parallelism import (
     resolve_preprocess_worker_count,
 )
 
+
+def normalize_sid(s: object) -> str:
+    """统一 sid 字符串（去首尾空白），避免索引/mcelog/tickets 对齐失败。"""
+    return str(s).strip()
+
+
 # ---------- 多进程预处理（仅 Linux + fork）----------
 # 子进程通过写时复制读父进程的 events / buckets，避免 spawn 下整表 pickle 到子进程。
 # _WORKER_CTX：填网格时 pool.map(_fill_indices_batch) 各子进程读的全局上下文。
@@ -85,7 +91,7 @@ def _fill_indices_batch(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, in
     skipped: list[int] = []
     for j, ii in enumerate(indices):
         i = int(ii)
-        sid = str(sids[i])
+        sid = normalize_sid(sids[i])
         pt = float(pts[i])
         sl = window_slice(events, sid, pt, win)
         if sl is None:
@@ -267,14 +273,14 @@ def build_events_by_sid(
         rows = chunk["row"].to_numpy(dtype=np.int32, copy=False)
         cols = chunk["col"].to_numpy(dtype=np.int32, copy=False)
         et = chunk["error_type"].to_numpy(dtype=np.int8, copy=False)
-        sids = chunk["sid"].astype(str).to_numpy(copy=False)
+        sids = chunk["sid"].map(normalize_sid).to_numpy(copy=False)
         if has_bank:
             banks = np.clip(chunk["bankid"].to_numpy(
                 dtype=np.int32, copy=False), 0, 15)
         else:
             banks = np.zeros(len(chunk), dtype=np.int32)
         for i in range(len(chunk)):
-            sid = str(sids[i])
+            sid = normalize_sid(sids[i])
             if np.isnan(tsec[i]):
                 continue
             buckets[sid]["t"].append(float(tsec[i]))
@@ -365,7 +371,7 @@ def load_index_table(
     for col in ("sid", "predict_time"):
         if col not in df.columns:
             raise ValueError(f"索引表必须包含列 `{col}`，当前: {list(df.columns)}")
-    df["sid"] = df["sid"].astype(str)
+    df["sid"] = df["sid"].map(normalize_sid)
     pts = pd.to_datetime(df["predict_time"], errors="coerce", format="mixed")
     if pts.isna().any():
         bad = int(pts.isna().sum())
@@ -809,10 +815,10 @@ def materialize_dataset(
         # 单进程：按 sid 分组再按 predict_ts 排序遍历，顺序与多进程分批填充语义一致，利于复现
         sid_to_rows: dict[str, list[int]] = defaultdict(list)
         for i in range(n):
-            sid_to_rows[str(sids_arr[i])].append(i)
+            sid_to_rows[normalize_sid(sids_arr[i])].append(i)
         for _sid, inds in sid_to_rows.items():
             for i in sorted(inds, key=lambda ii: float(pts_arr[ii])):
-                sid = str(sids_arr[i])
+                sid = normalize_sid(sids_arr[i])
                 pts = float(pts_arr[i])
                 sl = window_slice(events, sid, pts, win)
                 if sl is None:
@@ -844,34 +850,47 @@ def materialize_dataset(
     gc.collect()
 
     drop_empty = bool(data_cfg.get("drop_empty_mcelog_windows", True))
+    drop_empty_pos = bool(data_cfg.get("drop_empty_positive_windows", False))
     n_before_drop = int(n)
     n_dropped_empty = 0
     n_empty_kept_positive = 0
-    # 空窗 = mcelog 特征窗 [predict_ts−W, predict_ts) 内无事件；仅丢弃 y=0 行，避免 rare 正标签因对齐丢失。
+    n_dropped_empty_positive = 0
+    # 空窗 = mcelog 特征窗 [predict_ts−W, predict_ts) 内无事件。
+    # 默认仅丢负样本空窗；工程模式 drop_empty_positive_windows=true 时正样本空窗也丢弃（纯 mcelog 可学样本）。
     if drop_empty and empty_row_indices:
         empty_set = set(int(i) for i in empty_row_indices)
         keep = np.ones(n, dtype=bool)
         for i in empty_set:
             if int(y[i]) == 0:
                 keep[i] = False
+            elif drop_empty_pos:
+                keep[i] = False
+                n_dropped_empty_positive += 1
             else:
                 n_empty_kept_positive += 1
         n_dropped_empty = int((~keep).sum())
-        if n_dropped_empty > 0 or n_empty_kept_positive > 0:
+        if n_dropped_empty > 0 or n_empty_kept_positive > 0 or n_dropped_empty_positive > 0:
             X = X[keep]
             y = y[keep]
             idx_df = idx_df.loc[keep].reset_index(drop=True)
             tab = tab[keep]
             n = int(keep.sum())
-            print(
-                f"已丢弃 {n_dropped_empty}/{n_before_drop} 条空 mcelog 窗口负样本"
-                f"（drop_empty_mcelog_windows=true；正样本空窗保留 {n_empty_kept_positive} 条）。",
-                flush=True,
-            )
+            msg = f"已丢弃 {n_dropped_empty}/{n_before_drop} 条空 mcelog 窗口样本"
+            if drop_empty_pos:
+                msg += f"（含正样本空窗 {n_dropped_empty_positive} 条；drop_empty_positive_windows=true）"
+            else:
+                msg += f"（负样本空窗；正样本空窗保留 {n_empty_kept_positive} 条）"
+            print(msg + "。", flush=True)
     elif not drop_empty and n_empty_grids > 0:
         print(
             "提示：drop_empty_mcelog_windows=false，空窗样本仍保留（X 对应 mcelog 通道为全零）。",
             flush=True,
+        )
+
+    if n == 0:
+        raise ValueError(
+            "预处理后无剩余样本（可能 drop_empty_mcelog_windows / drop_empty_positive_windows "
+            "删除了全部行，或索引与 mcelog 无交集）。请检查索引路径、mcelog 覆盖与空窗策略。"
         )
 
     # 逐样本标记：特征窗 [predict_ts−W, predict_ts) 内是否无 mcelog 事件（供误差分析 / FN 归因）
@@ -948,8 +967,10 @@ def materialize_dataset(
         "n_empty_grids": int(n_empty_grids),
         "n_empty_grids_dropped": int(n_dropped_empty),
         "n_empty_grids_kept_positive": int(n_empty_kept_positive),
+        "n_empty_positive_dropped": int(n_dropped_empty_positive),
         "n_samples_before_drop": int(n_before_drop),
         "drop_empty_mcelog_windows": bool(drop_empty),
+        "drop_empty_positive_windows": bool(drop_empty_pos),
         "index_features_path": str(Path(data_cfg["index_features_path"]).resolve()),
         "time_axis": "relative_seconds_since_global_min",
         "time_epoch_offset_absolute": float(time_epoch_offset),

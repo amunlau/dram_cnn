@@ -23,13 +23,13 @@ label_failure_types: [1, 2, 3]
 # 索引表 index_features_path
 # ---------------------------------------------------------------------------
 # 默认演示表由 bash scripts/build_index.sh smoke 生成（写入 features_5m_index_demo.csv）。
-# 全量 / 不同预测窗：scripts/build_index.py --mode full --label-horizon-seconds 1800 --window-seconds 1800 ...
+# 全量 / 不同预测窗：python3 -m dram2cnn.pipelines.run_build_index --mode full --label-horizon-seconds 1800 ...
 # 生成后在本文件或实验 yaml 的 overrides.data.index_features_path 指向对应 CSV，
 # 并删除 data/processed、data/splits 后重跑 preprocess。
 index_features_path: data/index_stubs/features_5m_index_demo.csv
 
 # ---------------------------------------------------------------------------
-# 索引生成参数（仅 scripts/build_index.py 读取；preprocess/materialize 不读此段）
+# 索引生成参数（仅 run_build_index / build_index.sh 读取；preprocess/materialize 不读此段）
 # horizon / window 以本文件顶层 data.window_seconds、label_horizon_seconds 为准（勿在此重复）
 # ---------------------------------------------------------------------------
 index_build:
@@ -71,8 +71,10 @@ index_build_presets:
     min_positives: 50
     min_total_rows: 500
 
-# 预处理：丢弃 mcelog 窗口无事件的负样本（y=0）；正样本空窗仍保留（manifest: n_empty_grids_kept_positive）
+# 预处理：丢弃 mcelog 窗口无事件的负样本（y=0）
 drop_empty_mcelog_windows: true
+# 工程模式：true 时正样本空窗也丢弃（见 exp_full_recall_* / exp_full_precision_* overrides）
+drop_empty_positive_windows: false
 # 切分后归一化：robust=median/IQR（默认，对 log1p 后时间漂移更稳）；zscore=mean/std
 normalization_method: robust
 # 归一化后 clip 到 [-clip, clip]；null 表示不裁剪

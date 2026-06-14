@@ -8,7 +8,7 @@
 #
 # 【怎么用】
 #   bash scripts/train_ddp.sh
-#   bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml
+#   bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml
 #   CUDA_VISIBLE_DEVICES=0,1 bash scripts/train_ddp.sh   # 只用部分显卡
 #
 # 【与 train.sh 的关系】
@@ -27,20 +27,20 @@ cd "${PROJECT_ROOT}"
 source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
-EXP_CONFIG="${1:-configs/experiments/exp_full_best_ddp.yaml}"
+EXP_CONFIG="${1:-configs/experiments/exp_full_f1_ddp.yaml}"
 
 echo "[train_ddp.sh] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<not-set, use all visible GPUs>}"
 echo "[train_ddp.sh] exp_config=${EXP_CONFIG}"
 
-# 全量 DDP 实验不应仍指向演示 stub 索引（须 index_features_path 指向 full CSV，见 exp_full_best_ddp.yaml）
+# 全量 DDP 实验不应仍指向演示 stub 索引（无 max_index_rows 截断时须用 full CSV）
 python3 - "${EXP_CONFIG}" <<'PY' || exit 1
 import sys
 from dram2cnn.utils.config import load_experiment_config
-from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub
+from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub
 
 try:
     cfg = load_experiment_config(sys.argv[1])
-    assert_full_best_index_not_stub(cfg, context="train_ddp.sh")
+    assert_full_scale_index_not_stub(cfg, context="train_ddp.sh")
     print(f"[train_ddp.sh] index_features_path OK: {cfg['data'].get('index_features_path')}")
 except RuntimeError as exc:
     print(exc, file=sys.stderr)

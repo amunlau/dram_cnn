@@ -38,7 +38,11 @@ def _load_checkpoint_state(path: Path, map_location):
         return torch.load(str(path), map_location=map_location)
 
 
-def _resolve_threshold(run_dir: Path, default=0.5):
+def _resolve_threshold(run_dir: Path, infer_cfg: dict | None = None, default=0.5):
+    infer_cfg = infer_cfg or {}
+    override = infer_cfg.get("threshold_override")
+    if override is not None and override not in ("null", ""):
+        return float(override)
     tfile = run_dir / "best_threshold.json"
     if not tfile.is_file():
         return float(default)
@@ -139,7 +143,7 @@ def predict(model_cfg: dict, infer_cfg: dict, ckpt_path: str, splits_dir: str, o
     model.eval()
 
     train_artifact_dir = ckpt.resolve().parent.parent
-    threshold = _resolve_threshold(train_artifact_dir, default=0.5)
+    threshold = _resolve_threshold(train_artifact_dir, infer_cfg, default=0.5)
 
     local_rows: list[dict] = []
     cursor = 0

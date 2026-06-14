@@ -49,7 +49,16 @@ from dram2cnn.data.tianchi_build import (
     load_ticket_failures,
     merge_ticket_labels,
 )
-from dram2cnn.utils.config import label_horizon_seconds_from_dict
+from dram2cnn.utils.config import label_horizon_seconds_from_dict, project_root
+
+
+def _repo_relative(path: Path) -> str:
+    """manifest / stats 中优先写入相对仓库根的路径。"""
+    root = project_root()
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
 
 
 def _time_range(start: float, end: float, step: float) -> np.ndarray:
@@ -143,7 +152,7 @@ class IndexBuildConfig:
     """索引表生成参数。
 
     字段来源：`configs/data.yaml` 的 `index_build` 段 + 顶层路径/horizon 字段。
-    CLI `scripts/build_index.py` 会合并 preset（smoke/full）后传入 `from_dict`。
+    CLI ``dram2cnn.pipelines.run_build_index``（或 ``scripts/build_index.py``）会合并 preset（smoke/full）后传入 ``from_dict``。
 
     Attributes:
         mcelog_path / tickets_path: 原始 CSV 路径。
@@ -705,8 +714,8 @@ def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str
         "neg_sample_strategy": cfg.neg_sample_strategy,
         "config": asdict(cfg),
     }
-    stats["config"]["mcelog_path"] = str(cfg.mcelog_path)
-    stats["config"]["tickets_path"] = str(cfg.tickets_path)
+    stats["config"]["mcelog_path"] = _repo_relative(cfg.mcelog_path)
+    stats["config"]["tickets_path"] = _repo_relative(cfg.tickets_path)
     return out, stats
 
 
@@ -750,7 +759,7 @@ def validate_and_write_index(
         raise RuntimeError(f"索引校验失败：总行数 {len(y)} < min_total_rows={cfg.min_total_rows}")
     tmp.replace(out_path)
     return {
-        "path": str(out_path),
+        "path": _repo_relative(out_path),
         "n_rows": int(len(y)),
         "n_pos": n_pos,
         "n_neg": n_neg,

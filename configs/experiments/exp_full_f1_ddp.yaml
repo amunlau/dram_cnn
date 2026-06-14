@@ -1,7 +1,4 @@
-# 全量数据 + 按 sid 切分 + 多卡 DDP（跨服务器泛化评估）
-# 与 exp_full_best_ddp 共用同一 processed/ 与索引；仅切分策略与 splits 目录不同。
-# 前置：已对 exp_full_best_ddp 完成 preprocess（或对本 yaml 全量 preprocess 一次）。
-# 仅重切分：bash scripts/resplit.sh configs/experiments/exp_full_best_sid.yaml
+# 全量 + 项目 KPI：验证集 F1 最大化（time 切分；早停与阈值搜索均对齐 F1）
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml
@@ -10,21 +7,29 @@ infer: configs/infer.yaml
 
 overrides:
   base:
-    run_name: exp_tianchi_full_best_sid
+    run_name: exp_tianchi_full_f1_ddp
   data:
     index_features_path: data/raw/features_index_h300s_step300s_full.csv
     max_index_rows: null
     mcelog_max_rows: null
-    split_strategy: sid
-    splits_dir: data/splits_sid
+    split_strategy: time_stratified
     drop_empty_mcelog_windows: true
+    drop_empty_positive_windows: false
     normalization_method: robust
+    time_split:
+      min_pos_per_split: 1
     mcelog_chunk_rows: 400000
   train:
+    early_stop_metric: best_f1
     imbalance:
       positive_oversample_factor: 2
       weight_scheme: sqrt
       positive_weight_cap: 30.0
       focal_gamma: 0.0
+    threshold_search:
+      objective: f1
+      min: 0.1
+      max: 0.9
+      step: 0.02
     num_workers: 2
     prefetch_factor: 2

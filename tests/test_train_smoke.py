@@ -1,6 +1,6 @@
 import numpy as np
 
-from dram2cnn.engine.metrics import classification_metrics, search_best_threshold
+from dram2cnn.engine.metrics import classification_metrics, search_threshold
 
 
 def test_metrics_and_threshold_search_smoke():
@@ -18,5 +18,5 @@ def test_metrics_and_threshold_search_smoke():
 
     m_ap = classification_metrics(y_true, y_pred, y_prob)
     assert m_ap.get("avg_precision") is not None and 0.0 <= m_ap["avg_precision"] <= 1.0
-    best = search_best_threshold(y_true, y_prob, 0.1, 0.9, 0.1)
+    best = search_threshold(y_true, y_prob, 0.1, 0.9, 0.1, objective="f1")
     assert 0.1 <= best["threshold"] <= 0.9

@@ -85,7 +85,7 @@ bash scripts/build_index.sh smoke
 ```bash
 bash scripts/build_index.sh full
 # 输出：data/raw/features_index_h300s_step300s_full.csv
-# exp_full_best_ddp.yaml 已默认指向该路径；baseline 仍用演示 stub
+# 全量实验 yaml 已默认指向该路径；baseline 仍用演示 stub
 ```
 
 自定义 horizon / 采样步长示例：
@@ -109,14 +109,15 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 
 | 实验 YAML | 用途 |
 |-----------|------|
-| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行；产物 **`data/processed_smoke/`、`data/splits_smoke/`**（与全量 `processed/` 隔离，可并行保留全量数据）；**overrides 关闭 DDP/auto_batch** |
-| `exp_full_best_ddp.yaml` | **全量 + 多卡**：全量索引路径 + 取消行数截断；**model.yaml**；**time_stratified**；**time_split 0.7/0.15/0.15**；**gpu/ddp 继承 base** |
-| `exp_full_best_sid.yaml` | **全量 + sid 切分**（跨服务器泛化）：与 full_best 共用 `data/processed/`；**splits → `data/splits_sid/`**；训练产物 `runs/exp_tianchi_full_best_sid/` |
-| `exp_baseline_sid.yaml` | 冒烟 + **sid 切分**（`processed_smoke/` + `splits_sid_smoke/`）；快速验证 sid 流水线 |
-| `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归（**model.yaml** + **focal_gamma=0**） |
-| `exp_horizon_30m.yaml` | 30 分钟窗；**model.yaml**；**time_split / oversample 继承 data.yaml + train.yaml**（oversample 默认 2）；关闭 DDP |
-| `exp_horizon_1h.yaml` | 1 小时窗；**model.yaml**；**time_split / oversample 继承 data.yaml + train.yaml**；关闭 DDP |
-| `exp_optuna_smoke.yaml` | Optuna（**model.yaml** + **focal_gamma=0**）；小样本 data 截断 |
+| `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行；产物 **`data/processed_smoke/`、`data/splits_smoke/`** |
+| `exp_full_f1_ddp.yaml` / `exp_full_f1_sid.yaml` | **全量 F1 最大化**（项目 KPI）；`early_stop_metric: best_f1`；Notebook **`04_run_pipelines.ipynb`** |
+| `exp_full_recall_ddp.yaml` / `exp_full_recall_sid.yaml` | **全量召回率优先**；`threshold_profile: recall_guard`；Notebook **`05_full_recall_vs_precision.ipynb`** |
+| `exp_full_precision_ddp.yaml` / `exp_full_precision_sid.yaml` | **全量精度优先**；`threshold_profile: precision_guard`；Notebook **05** |
+| `exp_full_recall_ddp_balanced.yaml` / `exp_full_recall_sid_balanced.yaml` | 平衡工程向（recall≥0.82 且 precision 下限） |
+| `exp_baseline_sid.yaml` | 冒烟 + **sid 切分** |
+| `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归 |
+| `exp_horizon_30m.yaml` / `exp_horizon_1h.yaml` | Horizon 冒烟对比 |
+| `exp_optuna_smoke.yaml` | Optuna 超参搜索冒烟 |
 
 训练/推理产物写入 `runs/<run_name>/`（见 `configs/base.yaml` 的 `run_name`）。
 
@@ -220,53 +221,69 @@ bash scripts/inspect_data.sh
 
 「全量」包含两件事，**缺一不可**：
 
-1. 取消 `max_index_rows` / `mcelog_max_rows` 截断（`exp_full_best_ddp.yaml` 已做）。
-2. **`index_features_path` 指向全量索引 CSV**（仓库默认 **`exp_full_best_ddp.yaml` 已配置** `data/raw/features_index_h300s_step300s_full.csv`）。
+1. 取消 `max_index_rows` / `mcelog_max_rows` 截断（全量实验 yaml 已做）。
+2. **`index_features_path` 指向全量索引 CSV**（`data/raw/features_index_h300s_step300s_full.csv`）。
 
-### 推荐流程
+### 6.0 三种全量策略（Notebook 对照）
+
+| 目标 | Notebook | time YAML | sid YAML | preprocess 口径 |
+|------|----------|-----------|----------|-----------------|
+| **F1 最大化**（项目 KPI） | `04_run_pipelines.ipynb` | `exp_full_f1_ddp.yaml` | `exp_full_f1_sid.yaml` | `drop_empty_positive_windows: false` |
+| **召回率优先** | `05_full_recall_vs_precision.ipynb` | `exp_full_recall_ddp.yaml` | `exp_full_recall_sid.yaml` | `drop_empty_positive_windows: true` |
+| **精度优先** | `05_full_recall_vs_precision.ipynb` | `exp_full_precision_ddp.yaml` | `exp_full_precision_sid.yaml` | 同左 |
+
+> **F1 与工程向 preprocess 不可混用**：切换策略前须 `rm -rf data/processed/* data/splits/* data/splits_sid/*` 并重跑 preprocess。
+
+### 推荐流程（F1 示例）
 
 ```bash
-# 1. 生成全量索引（若尚未 build）
 bash scripts/build_index.sh full
-
-# 2. 确认全量索引路径（默认 yaml 已写好；自定义索引时改 overrides.data.index_features_path）
-
-# 3. 清空旧预处理产物（重要）
 rm -rf data/processed/* data/splits/*
 
-# 4. 预处理（系统 RAM 峰值 ≤50%，见 preprocess 日志）
-bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
+bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml
+bash scripts/validate.sh configs/experiments/exp_full_f1_ddp.yaml
 
-# 5. 校验
-bash scripts/validate.sh configs/experiments/exp_full_best_ddp.yaml
-
-# 6. 多卡训练（示例：3 卡）
-CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh
-
-# 7. 推理与评估
-bash scripts/infer.sh configs/experiments/exp_full_best_ddp.yaml   # 继承 base 默认多卡 + 显存 batch
-bash scripts/evaluate.sh configs/experiments/exp_full_best_ddp.yaml
+CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml
+bash scripts/infer.sh configs/experiments/exp_full_f1_ddp.yaml
+bash scripts/evaluate.sh configs/experiments/exp_full_f1_ddp.yaml
 ```
 
 训练启动时 rank0 会打印**数据摘要**；若仍提示 stub 路径，说明 `index_features_path` 未改成功。
 
 ### 6.1 按 sid 切分（跨服务器泛化评估）
 
-默认 `time_stratified` 允许同一台服务器（sid）的样本同时出现在 train 与 test，指标可能**高估**跨机泛化。`exp_full_best_sid.yaml` 使用 **`split_strategy: sid`**：在**唯一 sid** 上按与 `time_split` 相同的比例（默认 **70/15/15**）切分，并按 sid 是否曾出现正样本分层；产物写入 **`data/splits_sid/`**，训练 run 名为 **`exp_tianchi_full_best_sid`**。
+默认 `time_stratified` 允许同一 sid 跨 train/test。sid 实验使用 **`split_strategy: sid`**（70/15/15 + sid 级正例分层），产物 **`data/splits_sid/`**。
 
-在已完成 **`exp_full_best_ddp` 全量 preprocess**（`data/processed/` 已就绪）后，可**只重切分**，避免重复扫描 mcelog：
+在已完成**同口径**全量 preprocess 后，可只重切分：
 
 ```bash
-bash scripts/resplit.sh configs/experiments/exp_full_best_sid.yaml
-bash scripts/train_ddp.sh configs/experiments/exp_full_best_sid.yaml
-bash scripts/infer.sh configs/experiments/exp_full_best_sid.yaml
-bash scripts/evaluate.sh configs/experiments/exp_full_best_sid.yaml
+# F1 sid 示例（04）
+bash scripts/resplit.sh configs/experiments/exp_full_f1_sid.yaml
+bash scripts/train_ddp.sh configs/experiments/exp_full_f1_sid.yaml
+bash scripts/infer.sh configs/experiments/exp_full_f1_sid.yaml
+bash scripts/evaluate.sh configs/experiments/exp_full_f1_sid.yaml
 ```
 
-切分摘要（各 split 样本数、sid 数、空 mcelog 窗计数）见 **`data/splits_sid/split_manifest.json`**。  
-冒烟 sid 链路：`exp_baseline_sid.yaml` + 同上命令（单卡 `train.sh` 即可）。
+**指标口径**：`metrics.json` 顶层 = **部署 KPI**（验证集阈值）；`oracle_on_test` 仅作分析。
 
-**指标口径**：`metrics.json` **顶层字段 = 部署 KPI**（infer 使用的验证集阈值）；`oracle_on_test` 为测试集事后最优阈值，**不可**当作线上性能。详见 **`03_error_analysis.ipynb`**。
+### 6.2 工程向配置（低漏报 / 精度优先 / 可调阈值）
+
+召回/精度/平衡实验见 **`05_full_recall_vs_precision.ipynb`** 与下表：
+
+| 项 | 配置 | 作用 |
+|----|------|------|
+| `drop_empty_positive_windows: true` | data | 丢弃正/负空 mcelog 窗 |
+| `train.threshold_profile` | train | `recall_guard` / `precision_guard` / `balanced`（见 `configs/threshold_profiles.yaml`） |
+| `early_stop_metric: avg_precision` | train | 选模看排序，与阈值解耦 |
+| `infer.threshold_override` | infer | 手动覆盖 `best_threshold.json` |
+
+| 场景 | time | sid |
+|------|------|-----|
+| 召回率优先 | `exp_full_recall_ddp.yaml` | `exp_full_recall_sid.yaml` |
+| 精度优先 | `exp_full_precision_ddp.yaml` | `exp_full_precision_sid.yaml` |
+| 平衡（CLI 可选） | `exp_full_recall_ddp_balanced.yaml` | `exp_full_recall_sid_balanced.yaml` |
+
+Horizon 全量：`exp_horizon_30m_full.yaml`、`exp_horizon_1h_full.yaml`（需 `build_horizon_indexes.sh full`）。
 
 ---
 
@@ -296,7 +313,7 @@ bash scripts/build_horizon_indexes.sh full
 
 **前置**：若 `data/index_stubs/features_index_h1800s_step600s_smoke.csv` 等不存在，先执行 §7.1 的 `bash scripts/build_horizon_indexes.sh smoke`。
 
-实验 YAML 已指向 30min/1h 的 stub；**切换 horizon 前请清空 `data/processed` 与 `data/splits`**（validate 会比对 manifest 中的 horizon），再 preprocess + train：
+实验 YAML 已指向 30min/1h 的 stub，产物目录为 **`data/processed_horizon_*_smoke/`** 与 **`data/splits_horizon_*_smoke/`**（与默认 `processed/` 隔离）。**切换 horizon 前请清空对应 processed/splits 目录**（validate 会比对 manifest 中的 horizon），再 preprocess + train：
 
 ```bash
 bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
@@ -306,7 +323,12 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_1h.yaml
 bash scripts/train.sh configs/experiments/exp_horizon_1h.yaml
 ```
 
-全量对比时：先 `build_horizon_indexes.sh full`，修改对应 YAML 的 `index_features_path` 为 `data/raw/..._full.csv`，清空 processed/splits 后重跑 preprocess。
+**全量对比**：先 `bash scripts/build_horizon_indexes.sh full`，再直接使用内置全量实验（已指向 `data/raw/*_full.csv` 与独立 processed/splits 目录）：
+
+```bash
+bash scripts/preprocess.sh configs/experiments/exp_horizon_30m_full.yaml
+bash scripts/train_ddp.sh configs/experiments/exp_horizon_30m_full.yaml
+```
 
 ---
 
@@ -317,10 +339,10 @@ bash scripts/train.sh configs/experiments/exp_horizon_1h.yaml
 ```bash
 bash scripts/optuna.sh \
   configs/experiments/exp_optuna_smoke.yaml \
-  configs/hpo.yaml
+  configs/hpo/hpo.yaml
 ```
 
-- 搜索空间见 `configs/hpo.yaml`（backbone 深度、blocks、lr、dropout 等）。
+- 搜索空间见 `configs/hpo/hpo.yaml`（backbone 深度、blocks、lr、dropout 等）。
 - 最优 trial 摘要：`runs/optuna/<study_name>/best_trial.json`。
 - 默认实验为 `exp_optuna_smoke.yaml`（小样本、40 epoch）；**gpu/ddp 继承 `base.yaml`**，≥2 卡时每个 trial 经 `torchrun` 多卡训练（与 `train.sh` 相同策略）。
 - 多卡回归：`bash scripts/verify_ddp.sh`（含 optuna 1-trial 检查）。
@@ -338,13 +360,16 @@ bash scripts/optuna.sh \
 | `preprocess.sh [exp]` | 预处理 + 切分 | `exp_baseline.yaml` |
 | `validate.sh [exp] [--no-require-splits]` | 配置与数据校验 | `exp_baseline.yaml` |
 | `train.sh [exp]` | 单卡或自动 DDP + 显存 batch 探测 | `exp_baseline.yaml` |
-| `train_ddp.sh [exp]` | 多卡训练入口（调用 train.sh） | `exp_full_best_ddp.yaml` |
+| `train_ddp.sh [exp]` | 多卡训练入口（调用 train.sh） | `exp_full_f1_ddp.yaml` |
 | `infer.sh [exp]` | 单卡或自动 DDP 推理 + 显存 batch 探测 | `exp_baseline.yaml` |
 | `evaluate.sh [exp]` | 指标与图表 | `exp_baseline.yaml` |
 | `optuna.sh [exp] [hpo]` | 超参搜索 | `exp_optuna_smoke.yaml` |
 | `autotune.sh` | 一键冒烟全流程 | 见 `src/dram2cnn/pipelines/run_autotune.py` 的 `EXPS` |
 | `clean.sh [--notebooks] [--purge-indexes]` | 清理 runs、processed/splits、outputs、缓存；`--notebooks` 清 Notebook 输出；`--purge-indexes` 才删 raw 全量索引 | — |
+| `run_full_notebook_batch.sh` | 全量 F1 + 召回/精度批量流水线 | — |
 | `verify_ddp.sh` | 多卡 DDP 回归（train/infer/optuna） | `exp_ddp_verify.yaml` |
+
+合并部署 KPI：`python3 -m dram2cnn.utils.deployment_kpi`。
 | `inspect_data.sh` | 查看 processed 概览 | — |
 
 等价 Python 模块（需 `PYTHONPATH=src`）：
@@ -356,8 +381,8 @@ python3 -m dram2cnn.pipelines.run_train      configs/experiments/exp_baseline.ya
 python3 -m dram2cnn.pipelines.run_infer      configs/experiments/exp_baseline.yaml
 python3 -m dram2cnn.pipelines.run_evaluate   configs/experiments/exp_baseline.yaml
 python3 -m dram2cnn.pipelines.run_autotune   # 一键冒烟：preprocess（含 validate）→ train → infer → evaluate
-python3 -m dram2cnn.pipelines.run_optuna     configs/experiments/exp_optuna_smoke.yaml configs/hpo.yaml
-PYTHONPATH=src python3 scripts/build_index.py --mode smoke   # 索引构建（或 bash scripts/build_index.sh smoke）
+python3 -m dram2cnn.pipelines.run_optuna     configs/experiments/exp_optuna_smoke.yaml configs/hpo/hpo.yaml
+python3 -m dram2cnn.utils.deployment_kpi   # 合并 outputs/tables/*_deployment_kpi.csv
 # inspect_data.sh 为 shell + 内嵌 Python，无独立 -m 模块
 ```
 
@@ -377,7 +402,7 @@ workspace/
 │   └── <run_name>/          # 训练/推理会话、checkpoint、predictions
 ├── scripts/                 # 入口 shell
 ├── src/dram2cnn/            #  Python 包
-├── notebooks/               # EDA、特征/误差分析、**04 冒烟+全量流水线**
+├── notebooks/               # EDA、特征/误差分析、**04 F1 / 05 召回·精度流水线**
 └── docs/                    # 文档
 ```
 
@@ -411,7 +436,7 @@ workspace/
 ### 11.3 单卡调试 DDP 实验
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_best_ddp.yaml
+CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_f1_ddp.yaml
 ```
 
 可见 GPU 为 1 时即使用户 YAML 开启 DDP，也会走单进程。
@@ -437,7 +462,8 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 | `01_eda.ipynb` | raw 表 + 索引列概览 | 冒烟/全量**前** |
 | `02_feature_analysis.ipynb` | preprocess 后 `X` 统计 | **preprocess 后** |
 | `03_error_analysis.ipynb` | `predictions.csv` FP/FN | **infer 后** |
-| **`04_run_pipelines.ipynb`** | **冒烟 + 全量 time + 全量 sid** 端到端（marker 续跑） | 环境验证 / 正式训练 / **泛化对比** |
+| **`04_run_pipelines.ipynb`** | **冒烟 + 全量 F1（time + sid）** 端到端（marker 续跑） | 环境验证 / **项目 KPI F1** / time vs sid 泛化 |
+| **`05_full_recall_vs_precision.ipynb`** | **全量召回 / 精度**（time + sid，独立 run_name） | 工程部署策略对比 |
 
 ### 12.2 冒烟测试（Notebook）
 
@@ -454,49 +480,51 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 
 **推荐**：新 clone / 改代码后**先完成冒烟 Notebook**，再跑全量。
 
-### 12.3 全量测试（Notebook）
-
-同一 Notebook 的 **「全量测试」** 小节：
+### 12.3 全量 F1（Notebook `04_run_pipelines.ipynb`）
 
 | 步骤 | 操作 |
 |------|------|
-| 1 | 运行 **build_index full** 单元（耗时长） |
-| 2 | 确认 `exp_full_best_ddp.yaml` 的 `index_features_path` 指向已生成的 `data/raw/features_index_h300s_step300s_full.csv`（**仓库默认已配置**；自定义路径时再改 YAML） |
-| 3 | 清空 `data/processed/*`、`data/splits/*`；`clear_exp_markers("full_best")` 或删对应 marker |
-| 4 | 运行 **全量预检** 单元（仍指向 stub 会报错） |
-| 5 | 运行 **全量流水线** 单元（`train_ddp.sh`） |
+| 1 | **build_index full** 单元 |
+| 2 | 确认 `exp_full_f1_ddp.yaml` 指向全量索引 CSV |
+| 3 | 清空 `data/processed/*`、`data/splits/*`；`clear_exp_markers("full_f1")` |
+| 4 | **全量 F1 预检 + 流水线** 单元（`train_ddp.sh`） |
 
-- 多卡前在终端或 Notebook 外设置：`export CUDA_VISIBLE_DEVICES=0,1,2`。
-- 产物：`runs/exp_tianchi_full_best_ddp/`。
+- 产物：`runs/exp_tianchi_full_f1_ddp/`；对比表：`outputs/tables/full_f1_time_vs_sid_deployment_kpi.csv`
 
-### 12.4 全量 sid 泛化（Notebook）
+### 12.4 全量 F1 sid（Notebook 04）
 
-在同一 Notebook 的 **「全量 sid」** 小节（需 **§12.3 全量 preprocess 已完成**）：
+需 **§12.3 preprocess 已完成**（同口径 `drop_empty_positive_windows: false`）：
 
 | 步骤 | 操作 |
 |------|------|
 | 1 | 确认 `data/processed/preprocess_manifest.json` 存在 |
-| 2 | 运行 **sid 1/2** 单元：`resplit.sh` → `train_ddp` → `infer` → `evaluate` |
-| 3 | 运行 **sid 2/2** 单元：对比 time vs sid **deployment F1** → `outputs/tables/full_best_time_vs_sid_deployment_kpi.csv` |
+| 2 | **F1 sid 1/2** 单元：`resplit` → `train_ddp` → `infer` → `evaluate` |
+| 3 | **F1 sid 2/2** 单元：time vs sid deployment KPI |
 
-- 配置：**`exp_full_best_sid.yaml`** → `data/splits_sid/`；产物：`runs/exp_tianchi_full_best_sid/`。
-- 命令行等价：**§6.1** / `bash scripts/resplit.sh configs/experiments/exp_full_best_sid.yaml`。
-- 误差分析：`03_error_analysis.ipynb`，`EXP_YAML=exp_full_best_sid.yaml`。
+- 配置：`exp_full_f1_sid.yaml`；产物：`runs/exp_tianchi_full_f1_sid/`
 
-### 12.5 断点续跑与重跑
+### 12.5 全量召回 / 精度（Notebook `05_full_recall_vs_precision.ipynb`）
 
-- 每步成功会写 `runs/pipeline-logs/markers/<exp>__<step>.done`；重跑该单元时自动 **SKIP** 已完成步。
-- 仅重跑冒烟：`clear_exp_markers("smoke")`；仅重跑全量 time：`clear_exp_markers("full_best")`；仅重跑 sid：`clear_exp_markers("full_sid")`。
-- 改 horizon / 索引 / 网格：清空 processed 与各 `splits*` + 删除 **preprocess** marker。
+工程向 preprocess（`drop_empty_positive_windows: true`）与 F1 **不可混用**。见 **§6.0**。
 
-### 12.6 推荐顺序
+- marker：`full_eng` / `full_recall` / `full_precision` 等
+- 汇总表：`outputs/tables/full_recall_vs_precision_deployment_kpi.csv`
+
+### 12.6 断点续跑与重跑
+
+- marker 路径：`runs/pipeline-logs/markers/<exp>__<step>.done`
+- 04：`clear_exp_markers("full_f1")` / `clear_exp_markers("full_f1_sid")`
+- 05：`clear_exp_markers("full_eng")` / `clear_exp_markers("full_recall")` 等
+- F1 ↔ 工程向切换：清空 processed 与各 splits* + 删 preprocess marker
+
+### 12.7 推荐顺序
 
 ```
-01_eda → 04 冒烟 → 02 特征分析 → 03 误差分析
-                ↓（可选）
-         04 全量 time（build_index full + 全量单元）
-                ↓（跨机泛化对比）
-         04 全量 sid（resplit + 训练；不重复 preprocess）
+01_eda → 04 冒烟 → 02 / 03 分析
+                ↓
+         04 全量 F1（或 05 工程向，二选一 preprocess 口径）
+                ↓
+         04 F1 sid 或 05 召回/精度 sid
 ```
 
 修改 Python 源码后请 **Kernel → Restart** 再执行，避免缓存旧版 `dram2cnn`。
@@ -507,7 +535,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 
 1. **30 分钟**：终端 `bash scripts/autotune.sh`，或在 **`04_run_pipelines.ipynb` 冒烟单元** 跑通 → 浏览 `runs/exp_tianchi_baseline/`。
 2. **1 小时**：读 [`tianchi_pipeline.md`](tianchi_pipeline.md) + 手动跑一遍 §5 分步命令（或与 Notebook 冒烟对照）。
-3. **半天**：Notebook **全量 time 单元** 或 §6 命令行：`exp_full_best_ddp` + DDP；需 sid 对比时继续 **§6.1 / 04 sid 单元**。
+3. **半天**：Notebook **04 全量 F1** 或 **05 召回/精度**（§6）；sid 对比见各 Notebook sid 单元。
 4. **深入**：[`data_processing_guide.md`](data_processing_guide.md) + [`project_configuration_reference.md`](project_configuration_reference.md)。
 
 ---
@@ -518,7 +546,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 
 - `X_train` 与 `model.yaml` 形状不一致 → 重跑 preprocess
 - `pos_rate=0` 或 AUC 全 nan → 检查 `split_strategy`（默认 `time_stratified`）与索引正例数；全量训练时检查索引与工单打标
-- `exp_full_best_ddp` 样本数仍 ~500 → 未 `build_index.sh full`、未清空 `processed/`/`splits/` 重跑 preprocess，或误用 baseline 实验
+- 全量实验样本数仍 ~500 → 未 `build_index.sh full`、未清空 `processed/` 重跑 preprocess，或误用 baseline 实验
 - `n_empty_grids > 0` → 部分样本 mcelog 窗为空；默认仅丢弃 **负样本** 空窗（见 `drop_empty_mcelog_windows`）
 - DDP `nproc > GPU 数` → 调整 `nproc_per_node` 或 `CUDA_VISIBLE_DEVICES`
 

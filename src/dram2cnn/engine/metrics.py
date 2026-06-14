@@ -37,7 +37,6 @@ def classification_metrics(y_true, y_pred, y_prob=None):
                 out["roc_auc"] = float(roc_auc_score(yt, y_score))
             except ValueError:
                 out["roc_auc"] = None
-            # PR-AUC（Average Precision）：极不平衡下往往比 ROC-AUC 更能反映「检出正类」的排序能力。
             try:
                 out["avg_precision"] = float(average_precision_score(yt, y_score))
             except ValueError:
@@ -45,22 +44,99 @@ def classification_metrics(y_true, y_pred, y_prob=None):
     return out
 
 
-def search_best_threshold(y_true, y_prob, t_min=0.1, t_max=0.9, step=0.02):
-    """在验证集上对概率做阈值网格搜索，使 F1 最大。
+def _f_beta(precision: float, recall: float, beta: float) -> float:
+    if precision + recall <= 0:
+        return 0.0
+    b2 = beta * beta
+    return float((1 + b2) * precision * recall / (b2 * precision + recall))
 
-    用于极度不平衡场景下替代固定 0.5；搜索区间与步长由 configs/train.yaml 的
-    threshold_search 配置。返回的最优阈值会写入训练产物并在推理阶段用于二分类决策。
+
+def _score_at_threshold(y_true, y_prob, threshold: float) -> dict:
+    pred = (np.asarray(y_prob) >= float(threshold)).astype(int)
+    yt = np.asarray(y_true)
+    p = float(precision_score(yt, pred, zero_division=0))
+    r = float(recall_score(yt, pred, zero_division=0))
+    f1 = float(f1_score(yt, pred, zero_division=0))
+    return {"threshold": float(round(threshold, 4)), "precision": p, "recall": r, "f1": f1}
+
+
+def search_threshold(
+    y_true,
+    y_prob,
+    t_min: float = 0.1,
+    t_max: float = 0.9,
+    step: float = 0.02,
+    *,
+    objective: str = "f1",
+    min_precision: float = 0.0,
+    min_recall: float = 0.0,
+    f_beta: float = 1.0,
+) -> dict:
+    """在验证集上对概率做阈值网格搜索。
+
+    ``objective`` 可选：
+    - ``f1``：最大化 F1（默认，历史行为）
+    - ``f_beta``：最大化 F_beta（beta>1 偏向 recall，宁报勿漏可用 beta=2）
+    - ``recall_first``：在 precision >= min_precision 前提下最大化 recall
+    - ``min_recall``：在 recall >= min_recall 且 precision >= min_precision 前提下最大化 precision；
+      若无满足者则先放宽 precision 约束，再取全局最高 recall（宁报勿漏）
     """
-    best = {"threshold": 0.5, "f1": -1.0}
-    t = t_min
-    while t <= t_max + 1e-8:
-        pred = (np.asarray(y_prob) >= t).astype(int)
-        f1 = f1_score(y_true, pred, zero_division=0)
-        if f1 > best["f1"]:
-            best = {"threshold": float(round(t, 4)), "f1": float(f1)}
-        t += step
-    return best
+    obj = str(objective or "f1").lower().strip()
+    candidates: list[dict] = []
+    t = float(t_min)
+    while t <= float(t_max) + 1e-8:
+        row = _score_at_threshold(y_true, y_prob, t)
+        candidates.append(row)
+        t += float(step)
 
+    if not candidates:
+        return {"threshold": 0.5, "f1": -1.0, "precision": 0.0, "recall": 0.0, "objective": obj}
+
+    def _pick_best(rows: list[dict], key_fn) -> dict:
+        return max(rows, key=key_fn)
+
+    if obj == "f1":
+        best = _pick_best(candidates, lambda r: (r["f1"], r["recall"], -r["threshold"]))
+    elif obj == "f_beta":
+        beta = max(float(f_beta), 1e-6)
+
+        def fb_key(r):
+            return (_f_beta(r["precision"], r["recall"], beta), r["recall"], r["precision"])
+
+        best = _pick_best(candidates, fb_key)
+        best["f_beta"] = _f_beta(best["precision"], best["recall"], beta)
+    elif obj == "recall_first":
+        mp = float(min_precision)
+        ok = [r for r in candidates if r["precision"] >= mp - 1e-12]
+        pool = ok if ok else candidates
+        best = _pick_best(pool, lambda r: (r["recall"], r["precision"], -r["threshold"]))
+    elif obj == "min_recall":
+        mr = float(min_recall)
+        mp = float(min_precision)
+        ok = [
+            r for r in candidates
+            if r["recall"] >= mr - 1e-12 and r["precision"] >= mp - 1e-12
+        ]
+        if ok:
+            best = _pick_best(ok, lambda r: (r["precision"], r["recall"], -r["threshold"]))
+        else:
+            recall_ok = [r for r in candidates if r["recall"] >= mr - 1e-12]
+            if recall_ok:
+                best = _pick_best(recall_ok, lambda r: (r["precision"], r["recall"], -r["threshold"]))
+            else:
+                best = _pick_best(candidates, lambda r: (r["recall"], r["precision"], -r["threshold"]))
+    else:
+        raise ValueError(
+            f"threshold_search.objective must be one of: f1, f_beta, recall_first, min_recall (got {objective!r})"
+        )
+
+    best["objective"] = obj
+    if obj == "min_recall":
+        best["min_recall_target"] = mr
+        best["min_precision_floor"] = float(min_precision)
+    elif obj == "recall_first":
+        best["min_precision_floor"] = float(min_precision)
+    return best
 
 def build_pr_curve(y_true, y_prob):
     """构建 precision-recall 曲线数组用于绘图/导出。"""

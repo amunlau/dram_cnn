@@ -6,6 +6,8 @@ from __future__ import annotations
 便于在不同工作目录下运行脚本。
 
 **校验**：`validate_config` 会检查原始数据文件是否存在、`tabular_dim` 与 `TABULAR_DIM` 是否匹配等。
+全量索引 CSV（``data/raw/features_index_*_full.csv``）在 clean 后允许暂缺，preprocess 前由
+``check_preprocess_raw_inputs`` 强制要求已生成。
 """
 
 from copy import deepcopy
@@ -86,18 +88,35 @@ def _normalize_io_paths(obj: Any, project_root: Path) -> Any:
     return obj
 
 
-def validate_config(cfg: Dict[str, Any]) -> None:
+def _is_regenerable_full_index(path: Path) -> bool:
+    """全量索引由 ``build_index.sh full`` 生成；clean 后允许暂缺。"""
+    s = str(path).replace("\\", "/").lower()
+    return "features_index_" in s and "_full.csv" in s
+
+
+def validate_config(cfg: Dict[str, Any], *, require_full_index: bool = False) -> None:
     """在返回合并配置前做强校验；失败抛异常，避免训练中途才发现路径或维度错误。
 
     与 Notebook 里 `check_preprocess_raw_inputs` 分工不同：此处要求 model/infer 等完整字段存在且合法。
     `run_preprocess` 在加载完整配置前会先调用 `check_preprocess_raw_inputs` 做原始文件预检。
+
+    ``require_full_index=True`` 时强制 ``index_features_path`` 已落盘（用于 preprocess 前二次校验）。
+    默认对 ``data/raw/features_index_*_full.csv`` 允许暂缺，便于 clean 后直接加载全量实验 YAML。
     """
     data_cfg = cfg.get("data", {})
-    for k in ("mcelog_path", "tickets_path", "index_features_path"):
+    for k in ("mcelog_path", "tickets_path"):
         p = Path(data_cfg.get(k, ""))
         if not p.is_file():
             raise FileNotFoundError(
                 f"Config error: `{k}` is not a readable file: {p}")
+
+    idx = Path(data_cfg.get("index_features_path", ""))
+    if not idx.is_file():
+        defer = _is_regenerable_full_index(idx) and not require_full_index
+        if not defer:
+            raise FileNotFoundError(
+                f"Config error: `index_features_path` is not a readable file: {idx}"
+            )
 
     inv = data_cfg.get("inventory_path")
     if inv:
@@ -180,10 +199,17 @@ def validate_config(cfg: Dict[str, Any]) -> None:
 
     train_cfg = cfg.get("train", {})
     esm = str(train_cfg.get("early_stop_metric", "best_f1")).lower()
-    if esm not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
+    if esm not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision", "best_recall"}:
         raise ValueError(
             "Config error: train.early_stop_metric must be one of: "
-            "best_f1, roc_auc, f1_at_0p5, avg_precision"
+            "best_f1, roc_auc, f1_at_0p5, avg_precision, best_recall"
+        )
+    ts_cfg = train_cfg.get("threshold_search") or {}
+    ts_obj = str(ts_cfg.get("objective", "f1")).lower()
+    if ts_obj not in {"f1", "f_beta", "recall_first", "min_recall"}:
+        raise ValueError(
+            "Config error: train.threshold_search.objective must be one of: "
+            "f1, f_beta, recall_first, min_recall"
         )
     imb_cfg = train_cfg.get("imbalance") or {}
     if imb_cfg:
@@ -256,6 +282,39 @@ def deep_update(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _apply_threshold_profile(
+    merged: Dict[str, Any], root: Path, exp_overrides: Dict[str, Any] | None = None
+) -> None:
+    """将 ``configs/threshold_profiles.yaml`` 场景模板合并进 train（实验 overrides 显式值优先）。"""
+    train_cfg = merged.setdefault("train", {})
+    infer_cfg = merged.setdefault("infer", {})
+    profile_name = train_cfg.get("threshold_profile") or infer_cfg.get("threshold_profile")
+    if not profile_name:
+        return
+    profiles_path = root / "configs" / "threshold_profiles.yaml"
+    if not profiles_path.is_file():
+        raise FileNotFoundError(
+            f"Config error: threshold_profile={profile_name!r} 但缺少 {profiles_path}"
+        )
+    profiles = load_yaml(profiles_path).get("profiles") or {}
+    if profile_name not in profiles:
+        known = ", ".join(sorted(profiles)) or "(empty)"
+        raise ValueError(
+            f"Config error: unknown threshold_profile={profile_name!r}; known: {known}"
+        )
+    prof = profiles[profile_name] or {}
+    if "threshold_search" in prof:
+        exp_ts = ((exp_overrides or {}).get("train") or {}).get("threshold_search") or {}
+        inherit = train_cfg.get("threshold_search") or {}
+        ts = deep_update(prof["threshold_search"], exp_ts)
+        for k in ("enabled", "min", "max", "step", "f_beta"):
+            if k not in ts and k in inherit:
+                ts[k] = inherit[k]
+        train_cfg["threshold_search"] = ts
+    if "threshold_override" in prof and infer_cfg.get("threshold_override") in (None, "null"):
+        infer_cfg["threshold_override"] = prof["threshold_override"]
+
+
 def load_experiment_config(exp_path: str | Path) -> Dict[str, Any]:
     """加载实验 yaml：合并五段片段 + overrides，绝对化 IO 路径，再 validate_config。
 
@@ -279,6 +338,7 @@ def load_experiment_config(exp_path: str | Path) -> Dict[str, Any]:
         "infer": load_yaml(_resolve_config_include(exp["infer"], exp_parent, root)),
     }
     merged = deep_update(cfg, exp.get("overrides", {}))
+    _apply_threshold_profile(merged, root, exp.get("overrides", {}))
     merged = _normalize_io_paths(merged, root)
     validate_config(merged)
     return merged

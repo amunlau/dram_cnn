@@ -8,7 +8,7 @@
 #
 # 【怎么用】
 #   bash scripts/validate.sh
-#   bash scripts/validate.sh configs/experiments/exp_full_best_ddp.yaml
+#   bash scripts/validate.sh configs/experiments/exp_full_f1_ddp.yaml
 #   bash scripts/validate.sh configs/experiments/exp_baseline.yaml --no-require-splits
 #   bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml
 #

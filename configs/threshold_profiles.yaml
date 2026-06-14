@@ -1,0 +1,38 @@
+# 场景化阈值模板（由 load_experiment_config 合并；实验 yaml 中显式 threshold_search 优先）
+# 用法：在 overrides.train 中设置 threshold_profile: recall_guard | balanced | precision_guard
+profiles:
+  # 默认：使用训练验证集搜索的 best_threshold.json
+  default:
+    threshold_override: null
+
+  # 宁报勿漏（换件/隔离）：recall 优先，可接受较低 precision
+  recall_guard:
+    threshold_override: null
+    threshold_search:
+      objective: min_recall
+      min_recall: 0.88
+      min_precision: 0.50
+      min: 0.05
+      max: 0.95
+      step: 0.01
+
+  # 平衡：低漏报 + 可接受精度（推荐日常运维）
+  balanced:
+    threshold_override: null
+    threshold_search:
+      objective: min_recall
+      min_recall: 0.82
+      min_precision: 0.58
+      min: 0.05
+      max: 0.95
+      step: 0.01
+
+  # 高精度告警：precision 下限更高，recall 适度
+  precision_guard:
+    threshold_override: null
+    threshold_search:
+      objective: recall_first
+      min_precision: 0.65
+      min: 0.05
+      max: 0.95
+      step: 0.01

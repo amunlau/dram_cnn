@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 EXP="${1:-configs/experiments/exp_ddp_verify.yaml}"
-HPO="${2:-configs/hpo_verify.yaml}"
+HPO="${2:-configs/hpo/hpo_verify.yaml}"
 
 CUDA_COUNT="$(python3 -c 'import torch; print(torch.cuda.device_count() if torch.cuda.is_available() else 0)')"
 echo "=== DDP verify: visible GPUs=${CUDA_COUNT} ==="
@@ -68,7 +68,7 @@ set +e
 python3 -m dram2cnn.pipelines.run_optuna configs/experiments/exp_optuna_smoke.yaml "${HPO}" 2>&1 | tee "${OPTUNA_LOG}"
 OPTUNA_RC=$?
 set -e
-TRIAL_LOG="$(find "${PROJECT_ROOT}/runs" -path '*grid_cnn_hpo_verify_trial*/*train*.log' 2>/dev/null | sort | tail -1)"
+TRIAL_LOG="$(find "${PROJECT_ROOT}/runs/optuna" -path '*/grid_cnn_hpo_verify/trial*/*train*.log' 2>/dev/null | sort | tail -1)"
 if [[ -z "${TRIAL_LOG}" ]] || ! grep -q "world_size=${CUDA_COUNT}" "${TRIAL_LOG}"; then
   echo "FAIL: optuna trial missing world_size=${CUDA_COUNT} in ${TRIAL_LOG:-<no log>}"
   exit 1

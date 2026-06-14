@@ -1,4 +1,4 @@
-# 全量数据 + 多卡 DDP 训练入口（关闭调试截断，启用高吞吐默认）
+# 全量 sid + 召回率优先
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml
@@ -7,25 +7,26 @@ infer: configs/infer.yaml
 
 overrides:
   base:
-    run_name: exp_tianchi_full_best_ddp
+    run_name: exp_tianchi_full_recall_sid
   data:
     index_features_path: data/raw/features_index_h300s_step300s_full.csv
     max_index_rows: null
     mcelog_max_rows: null
-    split_strategy: time_stratified
+    split_strategy: sid
+    splits_dir: data/splits_sid
     drop_empty_mcelog_windows: true
+    drop_empty_positive_windows: true
     normalization_method: robust
-    time_split:
-      min_pos_per_split: 1
-    # 系统内存峰值 ≤50%（继承 data.yaml ram_budget_frac；全量 ~66k 行通常压至 worker=1）
     mcelog_chunk_rows: 400000
   train:
+    early_stop_metric: avg_precision
     imbalance:
       positive_oversample_factor: 2
-      # GridCNN-Deep 生产默认 focal_gamma=0（train.yaml）；此处显式写出便于审计
       weight_scheme: sqrt
       positive_weight_cap: 30.0
       focal_gamma: 0.0
+    threshold_profile: recall_guard
+    threshold_search:
+      min_precision: 0.50
     num_workers: 2
     prefetch_factor: 2
-    # gpu / ddp 继承 base.yaml（auto 多卡 + 80% 显存 batch）

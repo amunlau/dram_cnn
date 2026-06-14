@@ -15,8 +15,8 @@
   "n_rows_output": 500,
   "neg_sample_strategy": "random",
   "config": {
-    "mcelog_path": "/root/workspace/data/raw/mcelog.csv",
-    "tickets_path": "/root/workspace/data/raw/trouble_tickets.csv",
+    "mcelog_path": "data/raw/mcelog.csv",
+    "tickets_path": "data/raw/trouble_tickets.csv",
     "sample_interval_seconds": 300.0,
     "label_horizon_seconds": 300.0,
     "window_seconds": 300.0,
@@ -46,7 +46,7 @@
     ],
     "grid_representation": "spatial_heatmap"
   },
-  "path": "/root/workspace/data/index_stubs/features_5m_index_demo.csv",
+  "path": "data/index_stubs/features_index_h300s_step300s_smoke.csv",
   "n_rows": 500,
   "n_pos": 43,
   "n_neg": 457,

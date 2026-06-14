@@ -15,8 +15,8 @@
   "n_rows_output": 500,
   "neg_sample_strategy": "random",
   "config": {
-    "mcelog_path": "/root/workspace/data/raw/mcelog.csv",
-    "tickets_path": "/root/workspace/data/raw/trouble_tickets.csv",
+    "mcelog_path": "data/raw/mcelog.csv",
+    "tickets_path": "data/raw/trouble_tickets.csv",
     "sample_interval_seconds": 1800.0,
     "label_horizon_seconds": 3600.0,
     "window_seconds": 3600.0,
@@ -41,7 +41,7 @@
     "min_total_rows": 50,
     "max_positive_candidates": null
   },
-  "path": "/root/workspace/data/index_stubs/features_index_h3600s_step1800s_smoke.csv",
+  "path": "data/index_stubs/features_index_h3600s_step1800s_smoke.csv",
   "n_rows": 500,
   "n_pos": 61,
   "n_neg": 439,

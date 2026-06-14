@@ -57,23 +57,25 @@ def warn_unstable_deep_focal_combo(cfg: dict[str, Any], logger=None) -> None:
         return
     msg = (
         "GridCNN-Deep（model.yaml）与 focal_gamma=%s 在默认 lr 下已知易训练发散（loss/grad NaN）。"
-        " 推荐实验（exp_baseline / exp_full_best_ddp 等）已默认 focal_gamma=0；"
+        " 推荐实验（exp_baseline / exp_full_f1_ddp / exp_full_recall_ddp 等）已默认 focal_gamma=0；"
         "若仍启用 Focal，请同时降低 train.lr 并监控首轮 loss。"
     ) % gamma
     if logger is not None:
         logger.warning(msg)
     else:
-        import warnings
-
         warnings.warn(msg, stacklevel=2)
 
 
-def assert_full_best_index_not_stub(cfg: dict[str, Any], *, context: str = "train") -> None:
-    """`exp_full_best_ddp` 等全量实验不得仍指向 ~500 行演示索引。"""
-    run_name = str(cfg.get("base", {}).get("run_name", ""))
-    idx = str(cfg.get("data", {}).get("index_features_path", ""))
-    if "full_best" not in run_name and not run_name.endswith("full_best_ddp"):
+def assert_full_scale_index_not_stub(cfg: dict[str, Any], *, context: str = "train") -> None:
+    """无 index/mcelog 行数截断的全量实验不得仍指向演示 stub 索引。
+
+    适用于 ``exp_full_f1_*`` / ``exp_full_recall_*`` / ``exp_full_precision_*`` 等；
+    冒烟（``max_index_rows`` 非 null）不在此列。
+    """
+    data = cfg.get("data") or {}
+    if data.get("max_index_rows") is not None or data.get("mcelog_max_rows") is not None:
         return
+    idx = str(data.get("index_features_path", ""))
     if not is_stub_index_path(idx):
         return
     raise RuntimeError(

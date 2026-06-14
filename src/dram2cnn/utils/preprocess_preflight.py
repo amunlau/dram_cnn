@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dram2cnn.utils.config import _resolve_config_include, deep_update, load_yaml, project_root
+from dram2cnn.utils.config import _is_regenerable_full_index, _resolve_config_include, deep_update, load_yaml, project_root
 
 
 def experiment_run_name(exp_yaml: str | Path) -> str:
@@ -34,8 +34,15 @@ def check_preprocess_raw_inputs(exp_yaml: str | Path) -> None:
         if not p.is_absolute():
             p = (root / p).resolve()
         if not p.is_file():
+            hint = ""
+            if _is_regenerable_full_index(p):
+                hint = (
+                    "\n\n全量索引尚未生成。请先执行：\n"
+                    "  bash scripts/build_index.sh full\n"
+                    "或 horizon 全量：bash scripts/build_horizon_indexes.sh full"
+                )
             raise FileNotFoundError(
-                f"无法进行预处理：{key} 文件不存在:\n  {p}\n\n"
+                f"无法进行预处理：{key} 文件不存在:\n  {p}{hint}\n\n"
                 "请放置索引表（至少含 sid, predict_time）或修改 configs/data.yaml 中的路径。\n"
                 "说明见 docs/data_dictionary.md。"
             )

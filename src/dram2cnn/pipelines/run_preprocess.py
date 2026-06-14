@@ -17,7 +17,7 @@ from dram2cnn.data.splitter import split_by_sid, split_by_time, split_by_time_st
 from dram2cnn.data.tianchi_build import materialize_dataset
 from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_experiment_config
-from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub, assert_processed_matches_experiment
+from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub, assert_processed_matches_experiment
 from dram2cnn.utils.io import dump_json
 from dram2cnn.utils.preprocess_preflight import check_preprocess_raw_inputs
 
@@ -94,7 +94,7 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_onl
     if not split_only:
         check_preprocess_raw_inputs(exp_config)
     cfg = load_experiment_config(exp_config)
-    assert_full_best_index_not_stub(cfg, context="run_preprocess")
+    assert_full_scale_index_not_stub(cfg, context="run_preprocess")
     try:
         assert_processed_matches_experiment(cfg)
     except ValueError as exc:

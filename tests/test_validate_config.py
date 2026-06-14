@@ -140,3 +140,34 @@ def test_validate_config_rejects_bad_merged_vram_frac():
     }
     with pytest.raises(ValueError, match="vram_budget_frac"):
         validate_config(cfg)
+
+
+def test_validate_config_allows_missing_regenerable_full_index():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": "/nonexistent/data/raw/features_index_h300s_step300s_full.csv",
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "infer": {"mode": "full"},
+    }
+    validate_config(cfg)
+
+
+def test_validate_config_requires_full_index_when_requested():
+    cfg = {
+        "data": {
+            "mcelog_path": __file__,
+            "tickets_path": __file__,
+            "index_features_path": "/nonexistent/data/raw/features_index_h300s_step300s_full.csv",
+            "window_seconds": 300,
+            "label_horizon_seconds": 300,
+        },
+        "model": {"in_channels": 31, "tabular_dim": 0},
+        "infer": {"mode": "full"},
+    }
+    with pytest.raises(FileNotFoundError, match="index_features_path"):
+        validate_config(cfg, require_full_index=True)

@@ -68,7 +68,8 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
         logger.warning(
             "当前 index_features_path 仍指向 **演示/stub CSV**（约 500 行）。"
             " 冒烟请用 exp_baseline；全量请 `bash scripts/build_index.sh full` 并确认 "
-            "exp_full_best_ddp.yaml 的 index_features_path 为 data/raw/features_index_*_full.csv，"
+            "全量实验 yaml（如 exp_full_f1_ddp / exp_full_recall_ddp）的 index_features_path "
+            "为 data/raw/features_index_*_full.csv，"
             " 清空 data/processed 与 data/splits 后 **重跑 preprocess**。"
         )
 

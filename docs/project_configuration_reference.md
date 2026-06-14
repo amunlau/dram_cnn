@@ -1,6 +1,6 @@
 # DRAM 网格 CNN 项目：配置体系详解（参考手册）
 
-> **文档目的**：将本仓库中与「可重复实验」相关的全部 YAML 配置，从**设计原因**、**适用情况**、**修改方法**到**与代码/脚本的对应关系**，梳理为一份可独立阅读的说明。阅读对象包括：需要切换天池全量数据的研究人员、需要调训练/不平衡策略的工程师、以及希望理解「为何 baseline 与 full_best 行为不同」的协作者。  
+> **2026-06 实验命名**：项目 KPI F1 见 `exp_full_f1_*`（Notebook **04**）；工程向召回/精度见 `exp_full_recall_*` / `exp_full_precision_*`（Notebook **05**）。下文「全量实验」以 `exp_full_recall_ddp.yaml` 为例（与 baseline 对照）。
 > **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ---
@@ -14,7 +14,7 @@
 1. **五段片段配置**（fragment）：`configs/base.yaml`、`configs/data.yaml`、`configs/model.yaml`、`configs/train.yaml`、`configs/infer.yaml`。每段只承载一类决策，便于版本管理与 Code Review。  
 2. **实验入口 YAML**（experiment）：`configs/experiments/*.yaml`。它不重复抄写全部字段，而是通过 `base:` / `data:` 等键**指向**上述片段，再用 `overrides:` **仅覆盖**本次实验需要改动的子树。
 
-这种拆法的**直接好处**是：`exp_baseline.yaml` 可以在**不修改** `data.yaml` 默认全表语义的前提下，用 `overrides.data` 强行加上「只读 500 行索引、只扫 800000 行 mcelog」等调试约束（二者须与 `index_build_presets.smoke` 一致）；而 `exp_full_best_ddp.yaml` 则可以把 `max_index_rows` / `mcelog_max_rows` 置为 `null`，表示**取消调试截断**。**索引路径**由实验 `overrides.data.index_features_path` 分叉（baseline→stub，full_best→`data/raw/features_index_*_full.csv`）；窗口秒数、网格表示等仍继承 `data.yaml`，除非在 overrides 中显式修改。
+这种拆法的**直接好处**是：`exp_baseline.yaml` 可以在**不修改** `data.yaml` 默认全表语义的前提下，用 `overrides.data` 强行加上「只读 500 行索引、只扫 800000 行 mcelog」等调试约束（二者须与 `index_build_presets.smoke` 一致）；而 `exp_full_recall_ddp.yaml` 则可以把 `max_index_rows` / `mcelog_max_rows` 置为 `null`，表示**取消调试截断**。**索引路径**由实验 `overrides.data.index_features_path` 分叉（baseline→stub，全量实验→`data/raw/features_index_*_full.csv`）；窗口秒数、网格表示等仍继承 `data.yaml`，除非在 overrides 中显式修改。
 
 下文将按「从抽象到具体」的顺序展开：先说明**合并规则与路径解析**（否则后面读每个字段会困惑），再**逐文件、逐字段**解释含义与改法，最后给出**场景化操作清单**与**与源码模块的映射**，便于你自行追溯实现。
 
@@ -36,7 +36,7 @@
 
 ### 1.2 实验 YAML 与片段的关系
 
-实验 YAML（例如 `configs/experiments/exp_full_best_ddp.yaml`）在磁盘上是**普通文本文件**，其角色是：
+实验 YAML（例如 `configs/experiments/exp_full_recall_ddp.yaml`）在磁盘上是**普通文本文件**，其角色是：
 
 - **声明组合**：通过五个 `键: 相对路径` 告诉加载器去读哪些片段。  
 - **声明差异**：通过 `overrides` 子树声明「相对默认片段，本次要改什么」。
@@ -50,7 +50,7 @@
 1. **`index_features_path` 指向哪个文件**：若指向仓库内 `features_5m_index_demo.csv`，则无论 `max_index_rows` 是否为 `null`，**物理行数就只有演示规模**（约 **500 行**）。这是**数据源**层面的上限。  
 2. **`max_index_rows` / `mcelog_max_rows`**：在**已选定文件**的前提下，再对「读多少行索引」「顺序扫描 mcelog 时最多累积多少行」做**调试截断**。这是**工程试跑**层面的上限。
 
-`exp_full_best_ddp.yaml` 的 `overrides` 把第二类设为 `null`，语义是「**不要**在试跑阶段再砍索引行、不要提前结束 mcelog 扫描」。**第一类（索引文件路径）** 在仓库默认的 `exp_full_best_ddp.yaml` 中已通过 `overrides.data.index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`；baseline 仍用 `data.yaml` 的演示 stub。若自定义实验 yaml 未覆盖该键，或磁盘上仍是旧 preprocess 产物，则须 **`build_index.sh full` + 清空 `processed/`/`splits/` 后重跑 preprocess**。
+`exp_full_recall_ddp.yaml` 的 `overrides` 把第二类设为 `null`，语义是「**不要**在试跑阶段再砍索引行、不要提前结束 mcelog 扫描」。**第一类（索引文件路径）** 在仓库默认的 `exp_full_recall_ddp.yaml` 中已通过 `overrides.data.index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`；baseline 仍用 `data.yaml` 的演示 stub。若自定义实验 yaml 未覆盖该键，或磁盘上仍是旧 preprocess 产物，则须 **`build_index.sh full` + 清空 `processed/`/`splits/` 后重跑 preprocess**。
 
 这一区分是本项目文档中反复强调的**心智模型**：**改数据源路径 = 新一次数据构建；改 max_* = 同一张源表上的子集实验**。
 
@@ -141,7 +141,7 @@
 
 ### 4.3 `run_name`
 
-**最关键的人类可读标识之一**，决定 `runs/<run_name>/` 目录名。`exp_baseline` 与 `exp_full_best_ddp` 通过 overrides 把它分别设为 `exp_tianchi_baseline` 与 `exp_tianchi_full_best_ddp`。
+**最关键的人类可读标识之一**，决定 `runs/<run_name>/` 目录名。`exp_baseline` 与 `exp_full_recall_ddp` 通过 overrides 把它分别设为 `exp_tianchi_baseline` 与 `exp_tianchi_full_recall_ddp`。
 
 **原因**：同一台机器上并行保留 baseline 与 full 产物，互不混淆。
 
@@ -210,11 +210,11 @@
 **详细情况**：
 
 - 演示路径 `data/index_stubs/features_5m_index_demo.csv`：约 500 行，适合 CI 与教学（`bash scripts/build_index.sh smoke` 可重建）。  
-- 全量路径：先 **`bash scripts/build_index.sh full`**，输出 `data/raw/features_index_h300s_step300s_full.csv`（`exp_full_best_ddp.yaml` 已默认指向该文件）。
+- 全量路径：先 **`bash scripts/build_index.sh full`**，输出 `data/raw/features_index_h300s_step300s_full.csv`（`exp_full_recall_ddp.yaml` 已默认指向该文件）。
 
 **方法**：修改配置后务必清空 `processed`/`splits` 并重跑 preprocess；否则训练会读取与当前配置不一致的 `X_train.npy`。
 
-文件内长注释已说明「实验 yaml 里也可 `overrides.data.index_features_path`」——适用于「baseline 仍演示、full_best 指全量」的分叉需求。
+文件内长注释已说明「实验 yaml 里也可 `overrides.data.index_features_path`」——适用于「baseline 仍演示、全量实验指全量索引 CSV」的分叉需求。
 
 ### 5.2 `processed_dir` 与 `splits_dir`
 
@@ -224,7 +224,7 @@
 
 枚举：`spatial_heatmap`（默认，对齐天池 132973 报告推荐的空间分箱 + bank 通道）与 `legacy_rc_et`（原始 row/col + error_type 三通道，用于小网格调试）。
 
-**配置原因**：两种表示下 `X` 的 `C/H/W` 完全不同。`exp_baseline` 使用 **`configs/model_smoke.yaml`**（与 `model.yaml` 同 C/H/W=31×128×32，但 backbone 更浅、参数量约 1/4）；`exp_full_best_ddp` / `exp_optuna_smoke` 使用完整 **`configs/model.yaml`**。切换 `grid_representation` 时须同步 `model.in_channels` / `grid_height` / `grid_width` 并重跑 preprocess。
+**配置原因**：两种表示下 `X` 的 `C/H/W` 完全不同。`exp_baseline` 使用 **`configs/model_smoke.yaml`**（与 `model.yaml` 同 C/H/W=31×128×32，但 backbone 更浅、参数量约 1/4）；`exp_full_recall_ddp` / `exp_optuna_smoke` 使用完整 **`configs/model.yaml`**。切换 `grid_representation` 时须同步 `model.in_channels` / `grid_height` / `grid_width` 并重跑 preprocess。
 
 **方法**：默认实验应使用 `spatial_heatmap`；切换 `grid_representation` 时**必须**重跑 preprocess 并同步 `model.yaml` 或实验 overrides 中的张量维。
 
@@ -250,9 +250,9 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 - **特征窗口** `[predict_ts - window_seconds, predict_ts)`（**半开**）：默认 **300 秒**；Horizon 实验常令 **W=H**（如 1800/3600），与负样本索引步长 **`sample_interval_seconds`** 可不同。
 - **标签窗口** `[predict_ts, predict_ts + label_horizon_seconds]`（**闭**）：默认 **300 秒**。字段 **`label_backtrace_seconds`** 与之同义。
 
-`exp_baseline` 使用 **`model_smoke.yaml`**（轻量 GridCNN，形状同 31×128×32）；`exp_optuna_smoke` / `exp_full_best_ddp` 使用完整 **`model.yaml`**。Horizon 实验 `exp_horizon_30m` / `exp_horizon_1h` 默认使用 `data/index_stubs/` 下 horizon 冒烟索引（`build_horizon_indexes.sh smoke`）；全量对比需 `build_horizon_indexes.sh full` 并改 `index_features_path`。
+`exp_baseline` 使用 **`model_smoke.yaml`**（轻量 GridCNN，形状同 31×128×32）；`exp_optuna_smoke` / `exp_full_recall_ddp` 使用完整 **`model.yaml`**。Horizon 实验 `exp_horizon_30m` / `exp_horizon_1h` 默认使用 `data/index_stubs/` 下 horizon 冒烟索引（`build_horizon_indexes.sh smoke`）；全量对比需 `build_horizon_indexes.sh full` 并改 `index_features_path`。
 
-### 5.7b 索引生成（`index_build` / `scripts/build_index.py`）
+### 5.7b 索引生成（`index_build` / `dram2cnn.pipelines.run_build_index`）
 
 | 字段 | 含义 |
 |------|------|
@@ -281,7 +281,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 在 Linux 上，预处理的部分阶段可用多进程（fork + 写时复制）。`preprocess_workers: null` 表示「自动按 CPU 核数 × 比例推算预算」。`preprocess_parallel_frac: 0.6` 表示大约使用 **60% 逻辑核** 作为进程预算上限（112 核 ≈ 67 worker）。
 
-**全量实验 `exp_full_best_ddp`**：继承 **`ram_budget_frac: 0.5`**（系统内存峰值 ≤50% MemTotal），全量 ~66k 行时通常压至 **worker=1**；日志打印 RAM 预算与估算峰值。
+**全量实验 `exp_full_recall_ddp`**：继承 **`ram_budget_frac: 0.5`**（系统内存峰值 ≤50% MemTotal），全量 ~66k 行时通常压至 **worker=1**；日志打印 RAM 预算与估算峰值。
 
 **适用情况**：共享集群上为避免占满机器，可降至 `ram_budget_frac: 0.3` 或设 `preprocess_workers: 1`。
 
@@ -308,7 +308,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 - `max_index_rows`：只读索引表前 N 行（`null` 表示全表）。  
 - `mcelog_max_rows`：顺序扫描 mcelog 时最多读入多少行用于建桶（`null` 表示直到文件结束）。
 
-**与 full_best 的关系**：`exp_full_best_ddp` 将二者设为 `null`，并在 `overrides.data.index_features_path` 指向全量 CSV（默认 `data/raw/features_index_h300s_step300s_full.csv`），表示在**全量索引 + 完整 mcelog** 上不做调试截断。
+**与全量实验的关系**：`exp_full_recall_ddp` 将二者设为 `null`，并在 `overrides.data.index_features_path` 指向全量 CSV（默认 `data/raw/features_index_h300s_step300s_full.csv`），表示在**全量索引 + 完整 mcelog** 上不做调试截断。
 
 ### 5.13 `split_strategy` 与 `time_split`
 
@@ -316,7 +316,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 - `time`：按 `predict_ts` 排序后按比例切 train/val/test。  
 - `sid`：按唯一 `sid` 切分（比例继承 ``time_split``，默认 **70% / 15% / 15%**）；同一 sid 不跨 split；默认按 sid 是否曾出现正样本分层。
 
-`time_split` 下三个比例默认 `0.7/0.15/0.15`，和为 1；`min_pos_per_split` 默认 1。**`exp_baseline` 冒烟实验覆盖为 `0.6/0.2/0.2`**（略增大 val/test 以便早停与指标更稳）；`exp_horizon_*` / `exp_full_best_ddp` 继承 data.yaml 默认 0.7/0.15/0.15。`normalization_method` 默认 `robust`；`normalization_clip` 默认 **20**（null 不裁剪）；`drop_empty_mcelog_windows` 默认 true（仅丢弃负样本空窗）。
+`time_split` 下三个比例默认 `0.7/0.15/0.15`，和为 1；`min_pos_per_split` 默认 1。**`exp_baseline` 冒烟实验覆盖为 `0.6/0.2/0.2`**（略增大 val/test 以便早停与指标更稳）；`exp_horizon_*` / `exp_full_recall_ddp` 继承 data.yaml 默认 0.7/0.15/0.15。`normalization_method` 默认 `robust`；`normalization_clip` 默认 **20**（null 不裁剪）；`drop_empty_mcelog_windows` 默认 true（仅丢弃负样本空窗）。
 
 ---
 
@@ -353,7 +353,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ### 6.5 Optuna 可搜结构超参
 
-见 `configs/hpo.yaml`：`backbone_depth`（即 `backbone_channels` 列表，**3～4 stage**）、`blocks_per_stage`、`use_residual`、`conv_kernel_size`、`head_hidden`、`dropout`、`lr` 等。**不含** `tabular_fuse_dim`（默认 spatial 下 `tabular_dim=0`，该维无效）。
+见 `configs/hpo/hpo.yaml`：`backbone_depth`（即 `backbone_channels` 列表，**3～4 stage**）、`blocks_per_stage`、`use_residual`、`conv_kernel_size`、`head_hidden`、`dropout`、`lr` 等。**不含** `tabular_fuse_dim`（默认 spatial 下 `tabular_dim=0`，该维无效）。
 
 ---
 
@@ -363,7 +363,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 - `batch_size`：默认 256。DDP 下为**每进程 per-GPU batch**（总有效 batch ≈ `batch_size × world_size`）。  
 - `epochs` / `lr` / `weight_decay`：标准监督学习超参。  
-- `num_workers`：DataLoader worker；默认 `0`（冒烟/调试）。**全量 `exp_full_best_ddp` 默认 2**，配合 `prefetch_factor: 2`（64GB 机器省内存）。  
+- `num_workers`：DataLoader worker；默认 `0`（冒烟/调试）。**全量 `exp_full_recall_ddp` 默认 2**，配合 `prefetch_factor: 2`（64GB 机器省内存）。  
 - `max_grad_norm`：梯度裁剪；在强 class weight 下抑制爆炸步长。  
 - `cudnn_benchmark`：以可复现性换吞吐；论文终稿阶段若需严格比特一致可关。
 
@@ -393,16 +393,29 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 验证阶段在 `[min,max]` 上以 `step` 扫描阈值，写入 **`best_threshold.json`**；推理阶段读取该文件作为默认阈值（缺失则用 0.5；**JSON 损坏会报错**，不会静默回退）。
 
+**`objective`**（`train.threshold_search.objective`）：
+
+| 值 | 语义 |
+|----|------|
+| `f1` | 最大化 F1（默认，历史行为） |
+| `f_beta` | 最大化 F_beta（`f_beta>1` 偏向 recall） |
+| `recall_first` | 在 `precision >= min_precision` 下最大化 recall |
+| `min_recall` | 在 `recall >= min_recall` 且 `precision >= min_precision` 下最大化 precision；若无满足者则逐级放宽（工程「宁报勿漏」） |
+
+**场景模板**：`configs/threshold_profiles.yaml` 定义 `recall_guard` / `balanced` / `precision_guard`。实验 yaml 在 `overrides.train.threshold_profile` 引用；同段内显式 `threshold_search` 子键会覆盖模板默认值。
+
+**工程向组合**：`exp_full_recall_*` / `exp_full_precision_*`（Notebook **05**）使用 `early_stop_metric: avg_precision` + `threshold_profile`；项目 KPI F1 见 `exp_full_f1_*`（Notebook **04**）。
+
 ### 7.5 GPU / DDP
 
 默认见 **`configs/base.yaml`** 的 `gpu` / `ddp`（`train.sh` / `infer.sh` 通过 `dram2cnn.utils.gpu_launch` 解析）。本文件或实验 `overrides.train.*` 可覆盖子键，例如 `num_workers` 仍仅在本文件。
 
-### 7.6 Optuna 超参搜索（`configs/hpo.yaml`）
+### 7.6 Optuna 超参搜索（`configs/hpo/hpo.yaml`）
 
 - 入口：`bash scripts/optuna.sh [实验yaml] [hpo.yaml]`，默认 `exp_optuna_smoke.yaml`。  
 - **前置**：目标实验已完成 preprocess（存在 `data/splits/`）。  
 - 每个 trial 写入 `config_snapshot.json` 后，通过 **subprocess + `torchrun`（若 DDP 启用）** 调用 `run_train`，与 `train.sh` 共用 GPU 启动逻辑；study 汇总见 `runs/optuna/<study_name>/best_trial.json`。  
-- 搜索空间：`backbone_channels`（3～4 stage）、`blocks_per_stage`、`use_residual`、`conv_kernel_size`、`head_hidden`、`dropout`、`lr` 等（见 `configs/hpo.yaml`；不含 `tabular_fuse_dim`，默认 spatial 下无效）。
+- 搜索空间：`backbone_channels`（3～4 stage）、`blocks_per_stage`、`use_residual`、`conv_kernel_size`、`head_hidden`、`dropout`、`lr` 等（见 `configs/hpo/hpo.yaml`；不含 `tabular_fuse_dim`，默认 spatial 下无效）。
 
 ---
 
@@ -414,11 +427,11 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ---
 
-## 第九章 内置实验对照：`exp_baseline` vs `exp_full_best_ddp`
+## 第九章 内置实验对照：`exp_baseline` vs `exp_full_recall_ddp`
 
-| 维度 | exp_baseline | exp_full_best_ddp |
+| 维度 | exp_baseline | exp_full_recall_ddp |
 |------|--------------|-------------------|
-| `run_name` | `exp_tianchi_baseline` | `exp_tianchi_full_best_ddp` |
+| `run_name` | `exp_tianchi_baseline` | `exp_tianchi_full_recall_ddp` |
 | 索引/mcelog 截断 | `max_index_rows=500`，`mcelog_max_rows=800000`（须与 `index_build_presets.smoke.mcelog_scan_rows` 一致） | 二者 `null`（不截断） |
 | 网格 / horizon | 继承 `data.yaml`：**spatial_heatmap** + **5min** 窗/标签 | 同左 |
 | 模型片段 | **`model_smoke.yaml`**（轻量 GridCNN） | **`model.yaml`**（完整 GridCNN-Deep） |
@@ -427,7 +440,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 | 不平衡 / 早停 | **`focal_gamma=0`**，`weight_scheme=sqrt`，`cap=30`，`oversample=1`；`time_split 0.6/0.2/0.2` | **`focal_gamma=0`**，`sqrt`，`cap=30`，`oversample=2`；`time_split 0.7/0.15/0.15`；**`early_stop_metric=best_f1`**（继承 train.yaml） |
 | 典型用途 | 冒烟、CI、`autotune.sh` | 全量 preprocess/train；**须** `build_index.sh full`；仓库默认已在 overrides 指向全量索引 |
 
-**方法**：新人应先跑通 baseline，再切 full_best；切忌以为「full_best 文件名」就自动下载了天池数据。
+**方法**：新人应先跑通 baseline，再切全量实验 yaml；切忌以为「full 文件名」就自动下载了天池数据。
 
 ---
 
@@ -446,7 +459,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 2. **`bash scripts/build_index.sh full`**（或 `--label-horizon-seconds` 定制）生成 `data/raw/features_index_*.csv`。  
 3. 修改 `index_features_path`（或实验 overrides）指向该 CSV。  
 4. **删除** `data/processed`、`data/splits`（或清理 marker）。  
-5. 使用 `exp_full_best_ddp.yaml` 跑 preprocess（含 validate）→ train。  
+5. 使用 `exp_full_recall_ddp.yaml` 跑 preprocess（含 validate）→ train。  
 6. 打开训练日志，确认「数据摘要」中 `N_train`、`index_features_path` 符合预期，且无 stub WARNING。
 
 ### 场景 C：只想调早停，不动数据
@@ -484,7 +497,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 > 下列值为撰写本文时仓库默认值；若你本地已修改，以磁盘为准。
 
 **base**：`versioned_runs=true`，`device=auto`，`run_id` 与各 `*_run_id` 为 `null`。  
-**data**：spatial 默认 **`window_seconds=label_horizon_seconds=300`（5 分钟）**；`max_index_rows`/`mcelog_max_rows` 默认 `null`；索引由 `scripts/build_index.py` 生成，演示表见 `index_stubs/`。  
+**data**：spatial 默认 **`window_seconds=label_horizon_seconds=300`（5 分钟）**；`max_index_rows`/`mcelog_max_rows` 默认 `null`；索引由 `scripts/build_index.sh`（实现 `run_build_index.py`）生成，演示表见 `index_stubs/`。  
 **model**：`31×128×32`，`tabular_dim=0`；GridCNN-Deep 默认 `stem_channels=64`，`backbone_channels=[64,128,256,256]`，`blocks_per_stage=2`，`use_residual=true`。  
 **train.yaml 片段默认值**（合并前）：`batch_size=256`，`epochs=300`，`patience=50`，`early_stop_metric=best_f1`，`focal_gamma=0.0`，`weight_scheme=sqrt`，`positive_weight_cap=30`，`positive_oversample_factor=2`。  
 **实验合并后有效值**：各 shipped 实验 yaml 在 imbalance 上与 fragment 一致或显式覆盖（baseline 另设 `patience=6`、`epochs=20`、`model_smoke`、`oversample=1`）。  
@@ -594,7 +607,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ### 17.1 典型 shell 调用链
 
-`scripts/preprocess.sh`、`scripts/train.sh`、`scripts/train_ddp.sh`、`scripts/infer.sh`、`scripts/evaluate.sh` 均接收**同一个实验 yaml 路径**，从而保证「数据定义—模型—训练—推理」读取的是**同一份合并后配置**。若你在 preprocess 用 baseline、在 train 用 full_best，只要二者在 `data` 段不一致，就会导致**切分与特征版本错配**——这是新人高频错误，应避免。
+`scripts/preprocess.sh`、`scripts/train.sh`、`scripts/train_ddp.sh`、`scripts/infer.sh`、`scripts/evaluate.sh` 均接收**同一个实验 yaml 路径**，从而保证「数据定义—模型—训练—推理」读取的是**同一份合并后配置**。若你在 preprocess 用 baseline、在 train 用全量实验 yaml，只要二者在 `data` 段不一致，就会导致**切分与特征版本错配**——这是新人高频错误，应避免。
 
 ### 17.2 `.latest_train_session` 与 `.latest_infer_session`
 
@@ -611,10 +624,10 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 **问：我只改了 `model.yaml` 的 `grid_height`，为什么 train 还报错？**  
 答：因为磁盘上的 `X_train.npy` 形状与当前 `model.yaml` 不一致。必须重跑 preprocess 与切分，并确认实验未在 overrides 里覆盖成不一致的 model 段。
 
-**问：`exp_full_best_ddp` 已经写了全量，为什么 manifest 里 n 还是约 500？**  
-答：「全量」指 `max_index_rows`/`mcelog_max_rows` 为 `null`，且 **`index_features_path` 指向全量 CSV**（`exp_full_best_ddp.yaml` 默认已覆盖为 `data/raw/features_index_h300s_step300s_full.csv`）。若 manifest 仍约 500 行，常见原因是 **未 `build_index.sh full`、未清空 `processed/`/`splits/` 重跑 preprocess**，或仍用 baseline 实验。若路径仍含 stub，**`assert_full_best_index_not_stub` 会直接报错**。
+**问：`exp_full_recall_ddp` 已经写了全量，为什么 manifest 里 n 还是约 500？**  
+答：「全量」指 `max_index_rows`/`mcelog_max_rows` 为 `null`，且 **`index_features_path` 指向全量 CSV**（`exp_full_recall_ddp.yaml` 默认已覆盖为 `data/raw/features_index_h300s_step300s_full.csv`）。若 manifest 仍约 500 行，常见原因是 **未 `build_index.sh full`、未清空 `processed/`/`splits/` 重跑 preprocess**，或仍用 baseline 实验。若路径仍含 stub，**`assert_full_scale_index_not_stub` 会直接报错**。
 
-**问：能否让 baseline 与 full_best 同时存在两个不同索引？**  
+**问：能否让 baseline 与全量实验同时存在两个不同索引？**  
 答：可以。复制两份实验 yaml，在各自 `overrides.data.index_features_path` 写不同路径；或复制两份 `data` 片段文件并在实验中 `data: my_data_a.yaml` / `my_data_b.yaml` 指向它们。
 
 **问：`inventory_path` 能否设为空？**  
@@ -654,7 +667,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 逐步命令与脚本说明见 **[`user_guide.md` §6](./user_guide.md)**。以下为配置层面的核对项（假设 `data/raw/` 已放置 mcelog / tickets / inventory）：
 
-1. **实验入口**：`configs/experiments/exp_full_best_ddp.yaml`（或自定义 `run_name` 的等价 yaml）。  
+1. **实验入口**：`configs/experiments/exp_full_recall_ddp.yaml`（或自定义 `run_name` 的等价 yaml）。  
 2. **全量索引**：已执行 `bash scripts/build_index.sh full`；`index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（非 stub）。  
 3. **截断开关**：`max_index_rows` 与 `mcelog_max_rows` 为 `null`。  
 4. **清理产物**：删除 `data/processed/*`、`data/splits/*` 及 preprocess marker。  
@@ -720,7 +733,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 ## 第二十七章 模拟一次「配置评审会」对话（帮助自检）
 
 **评审者**：你为什么把 `window_seconds` 改成 1800？  
-**答辩者**：我们在做 30 分钟 horizon 对比实验，已用 `build_index.py` 生成匹配索引并重跑 preprocess。  
+**答辩者**：我们在做 30 分钟 horizon 对比实验，已用 `build_index.sh` / `run_build_index` 生成匹配索引并重跑 preprocess。  
 **评审者**：默认 5 分钟设定与天池 6 小时报告不同，请在报告中说明 horizon 与特征窗选择。  
 
 **评审者**：你的 `pos_rate` 为何从 0.05 变成 0.45？  

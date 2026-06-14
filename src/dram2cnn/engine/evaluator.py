@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from dram2cnn.engine.metrics import build_confusion, build_pr_curve, classification_metrics, search_best_threshold
+from dram2cnn.engine.metrics import build_confusion, build_pr_curve, classification_metrics, search_threshold
 from dram2cnn.utils.io import dump_json
 
 
@@ -67,7 +67,9 @@ def evaluate(pred_csv: str, output_json: str) -> None:
 
     if y_prob_series is not None:
         y_prob_np = y_prob_series.to_numpy(dtype=float, copy=False)
-        oracle = search_best_threshold(y_true.to_numpy(), y_prob_np, 0.1, 0.9, 0.01)
+        oracle = search_threshold(
+            y_true.to_numpy(), y_prob_np, 0.1, 0.9, 0.01, objective="f1"
+        )
         y_pred_oracle = (y_prob_np >= float(oracle["threshold"])).astype(int)
         metrics_oracle = classification_metrics(y_true, y_pred_oracle, y_prob_series)
         payload["oracle_on_test"] = {

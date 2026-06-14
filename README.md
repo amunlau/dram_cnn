@@ -4,7 +4,7 @@
 
 - **默认预测目标**：**未来 5 分钟**（`label_horizon_seconds=300`）；可通过配置或不同索引表对比 30 分钟、1 小时等 horizon。
 - **默认表示**（`grid_representation: spatial_heatmap`）：逻辑 **row/col 分箱** 为 **H×W=128×32**，**bankid 0–15** 为 **16 通道** + **inventory one-hot 15 通道** → **`X` 为 [N,31,128,32]**。
-- **模型**：**GridCNN-Deep**（`model.yaml`，生产/全量）；冒烟 baseline 用 **`model_smoke.yaml`**（同 C/H/W）；超参搜索见 **`configs/hpo.yaml`** + **`scripts/optuna.sh`**。
+- **模型**：**GridCNN-Deep**（`model.yaml`，生产/全量）；冒烟 baseline 用 **`model_smoke.yaml`**（同 C/H/W）；超参搜索见 **`configs/hpo/hpo.yaml`** + **`scripts/optuna.sh`**。
 
 细字段见 **`docs/tianchi_pipeline.md`**、**`docs/data_processing_guide.md`**。**完整操作流程见 [`docs/user_guide.md`](docs/user_guide.md)**。全量训练读 **`data/splits/`**；冒烟读 **`data/splits_smoke/`**（与全量 `processed/` 隔离）。
 
@@ -18,13 +18,13 @@
 | **输入** | **`X`** `[N,C,H,W]`，默认 **C=31** |
 | **标签** | **`y`**∈{0,1}，`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds` |
 | **模型** | **GridCNN-Deep**（`model.yaml`）；冒烟 **`model_smoke.yaml`** |
-| **评估 KPI** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索，与 infer 一致） |
+| **评估 KPI** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索）；工程向实验可改为 **`avg_precision`** + `threshold_profile` |
 
 ---
 
 ## 核心概念
 
-1. **索引表**：`(sid, predict_time)`；`predict_ts` 为 **相对秒**（全数据最早 raw 时刻 = 0）；由 **`scripts/build_index.py`** 从 `data/raw` 生成。
+1. **索引表**：`(sid, predict_time)`；`predict_ts` 为 **相对秒**（全数据最早 raw 时刻 = 0）；由 **`scripts/build_index.sh`**（实现 `pipelines/run_build_index.py`）从 `data/raw` 生成。
 2. **特征窗口**：半开区间 **`[predict_ts − window_seconds, predict_ts)`**（相对秒轴上计算）。
 3. **标签窗口**：闭区间 **`[predict_ts, predict_ts + label_horizon_seconds]`**。默认 **300s**。
 4. **索引策略**：正样本在 **`[ft−H, ft]`**（**ft 可晚于 mcelog 末尾**）按 `positive_sample_interval_seconds` 采样；近故障 hard neg 在 **`[ft−prefault, ft−H)`**；其余负样本在 **`[t_min+W, t_max−H]`** 内均匀/随机采样并逼近 `target_positive_ratio`。
@@ -68,13 +68,15 @@ flowchart LR
 | 训练超参 / 不平衡 | `configs/train.yaml` |
 | 推理 batch | `configs/infer.yaml` |
 | GridCNN 结构 | `configs/model.yaml` |
-| Optuna 搜索空间 | `configs/hpo.yaml` |
+| Optuna 搜索空间 | `configs/hpo/hpo.yaml` |
 | 实验入口（overrides） | `configs/experiments/*.yaml` |
 
 | 脚本 | 用途 |
 |------|------|
-| `scripts/build_index.py` | 从 `data/raw` 生成索引 CSV（smoke / full，CLI 入口） |
 | `scripts/build_index.sh` | 从 `data/raw` 生成真实索引（smoke / full） |
+| `scripts/build_index.py` | 上述 shell 的 Python 便捷入口（实现见 `pipelines/run_build_index.py`） |
+| `src/dram2cnn/utils/pipeline_helpers.py` | Notebook 流水线 marker / preflight |
+| `src/dram2cnn/utils/deployment_kpi.py` | 部署 KPI 汇总与 `full_all_strategies` 合并 |
 | `scripts/build_horizon_indexes.sh` | 批量生成 5min / 30min / 1h 对比索引 |
 | `scripts/preprocess.sh` | 预处理 + 切分（末尾 validate） |
 | `scripts/validate.sh` | 配置与 splits 校验 |
@@ -161,17 +163,17 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 |------|----------|------|
 | **预处理** | mcelog 按 sid 排序 + 填网格 `fork` Pool | 默认 **`ram_budget_frac: 0.5`**（系统内存峰值 ≤50%）；`preprocess_parallel_frac: 0.6` |
 | **训练 / 推理** | 单卡或 **DDP 多卡** + 80% 显存 batch 探测 | `base.yaml` 的 `gpu` / `ddp`；`bash scripts/train.sh` / `infer.sh` |
-| **DataLoader** | 多 worker 预取 | `train.yaml` 默认 **0**；`exp_full_best_ddp` 覆盖 **2**，配合 `prefetch_factor: 2` |
+| **DataLoader** | 多 worker 预取 | `train.yaml` 默认 **0**；全量实验（如 `exp_full_f1_ddp`）覆盖 **2** |
 
 脚本会自动 `source scripts/lib/env_perf.sh`（`OMP_NUM_THREADS=1` 等），避免 fork 与 BLAS 线程冲突。
 
 ```bash
 # 全量 + 3 卡 DDP（示例）
 bash scripts/build_index.sh full
-# exp_full_best_ddp.yaml 已默认指向全量索引；须清空旧产物后 preprocess：
+# 全量 F1：exp_full_f1_ddp.yaml 已默认指向全量索引；须清空旧产物后 preprocess：
 rm -rf data/processed/* data/splits/*
-bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml
-CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml
+bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml
+CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml
 ```
 
 详见 `docs/data_processing_guide.md` §9 与 `docs/project_configuration_reference.md` §5.10。

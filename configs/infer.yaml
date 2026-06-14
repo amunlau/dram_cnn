@@ -1,6 +1,8 @@
 batch_size: 512
 # 单头分类，仅 full
 mode: full
+# 手动覆盖训练阶段 best_threshold.json（null=不覆盖；宁报勿漏可设 0.2~0.4 进一步抬 recall）
+threshold_override: null
 # 推理 batch 上限可高于训练（仅 forward）；默认继承 base.gpu，此处提高 batch_size_max
 # gpu / ddp 默认见 configs/base.yaml；实验 overrides.infer.gpu / overrides.infer.ddp 可覆盖
 gpu:

@@ -30,7 +30,7 @@
 | `label_backtrace_seconds` | 与 `label_horizon_seconds` 同义（别名；配置加载时双向同步） |
 | `split_strategy` / `time_split` | 切分策略（默认 **`time_stratified`**）；比例默认 **0.7 / 0.15 / 0.15**（`exp_baseline` 覆盖为 0.6 / 0.2 / 0.2）；`min_pos_per_split` 默认 1 |
 | `normalization_clip` | 归一化后 clip 到 ±值（默认 20；null 不裁剪） |
-| `index_build` / `index_build_presets` | `scripts/build_index.py` 采样与平衡参数 |
+| `index_build` / `index_build_presets` | `dram2cnn.pipelines.run_build_index` 采样与平衡参数 |
 | `label_failure_types` | 工单类型列表，如 `[1,2,3]` |
 | `grid_max_row/col` | **legacy** 模式下 row/col 裁剪上限；spatial 下可忽略 |
 | `inventory_path` | `inventory.csv`；`null` 时 one-hot 全 0 |
@@ -46,9 +46,9 @@
 ## 模型（`configs/model.yaml` / `configs/model_smoke.yaml`）
 
 - **`exp_baseline`**：`model_smoke.yaml`（轻量 backbone，冒烟默认）
-- **`exp_full_best_ddp` / horizon / Optuna**：`model.yaml`（GridCNN-Deep 默认）
+- **`exp_full_f1_*` / `exp_full_recall_*` / horizon / Optuna**：`model.yaml`（GridCNN-Deep 默认）
 - `arch: grid_cnn`
 - `in_channels`、`grid_height` / `grid_width` 必须与 preprocess 写出的 `X.npy` 及 `preprocess_manifest.json` 中 `grid_shape` 一致（spatial 默认 **31×128×32**）。
 - **Backbone**：`stem_channels` + 4×(`blocks_per_stage` 卷积块 + 可选残差 + MaxPool)；默认 **blocks_per_stage=2**、**use_residual=true**，约 **19 个 Conv2d**。
-- `backbone_channels`、`conv_kernel_size`、`head_hidden`、`dropout` 等可由 Optuna 搜索（`configs/hpo.yaml`）。
+- `backbone_channels`、`conv_kernel_size`、`head_hidden`、`dropout` 等可由 Optuna 搜索（`configs/hpo/hpo.yaml`）。
 - `tabular_dim`：spatial 且 inventory 已拼入网格时为 **0**；legacy 或与 spatial+独立 tabular 并存时为 **15**。

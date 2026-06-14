@@ -17,6 +17,6 @@ source "${SCRIPT_DIR}/lib/env_perf.sh"
 export PYTHONPATH="${PROJECT_ROOT}/src:${PYTHONPATH:-}"
 
 EXP="${1:-configs/experiments/exp_optuna_smoke.yaml}"
-HPO="${2:-configs/hpo.yaml}"
+HPO="${2:-configs/hpo/hpo.yaml}"
 
 python3 -m dram2cnn.pipelines.run_optuna "${EXP}" "${HPO}"

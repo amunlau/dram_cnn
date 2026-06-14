@@ -102,7 +102,7 @@ flowchart TB
 
 ---
 
-## 3.5 索引表生成（`scripts/build_index.py`）
+## 3.5 索引表生成（`dram2cnn.pipelines.run_build_index`）
 
 索引表仅含 **`sid`, `predict_time`**，行数与正负比例由构建策略决定（**真实打标**，非 stub 随机数）：
 
@@ -272,9 +272,9 @@ t_min + W ≤ predict_ts ≤ t_max − H
 
 ## 8. 切分与标准化（`data/splits/`）
 
-1. **划分策略**（`split_strategy`）：默认 **`time_stratified`**；纯时间序用 `time`；**跨服务器泛化**用 **`sid`**（在唯一 sid 上按 `time_split` 比例切分，默认 70/15/15；见 `exp_full_best_sid.yaml`，可 `bash scripts/resplit.sh` 在已有 `processed/` 上重切分）。切分摘要写入 **`splits_dir/split_manifest.json`**。
+1. **划分策略**（`split_strategy`）：默认 **`time_stratified`**；跨服务器泛化用 **`sid`**（见 `exp_full_f1_sid.yaml` / `exp_full_recall_sid.yaml`，可 `bash scripts/resplit.sh` 在已有 `processed/` 上重切分）。
 2. **归一化**（`normalization_method`）：默认 **`robust`**（median / IQR，仅用 train 拟合）；可选 `zscore`。归一化后默认 **clip 到 ±`normalization_clip`**（20）。见 `splitter.normalize_split_features_by_train`。
-3. **空窗样本**（`drop_empty_mcelog_windows`，默认 true）：丢弃 **负样本** 中空 mcelog 窗行；**正样本** 即使空窗也保留（避免 rare label 因对齐丢失），manifest 记录 `n_empty_grids_dropped` / `n_empty_grids_kept_positive`。
+3. **空窗样本**（`drop_empty_mcelog_windows`，默认 true）：丢弃 **负样本** 中空 mcelog 窗行。**正样本** 默认保留空窗；工程模式 **`drop_empty_positive_windows: true`** 时正样本空窗也丢弃（见 `exp_full_recall_*` / Notebook **05**）。manifest 记录 `n_empty_grids_dropped` / `n_empty_grids_kept_positive`。
 
 由此得到 `X_train.npy` 等及 `normalization_stats.json`（含 `method: robust|zscore`）。
 
@@ -303,7 +303,7 @@ t_min + W ≤ predict_ts ≤ t_max − H
 **结构概要**（实现见 `src/dram2cnn/models/grid_cnn.py`）：
 
 1. **Stem Conv**：将 31 通道映射到 `stem_channels`（默认 64）；
-2. **4×Stage（默认）**：每 stage 含 `blocks_per_stage` 个卷积/残差块 + **MaxPool(2)**，空间尺寸逐级减半（128×32 → 64×16 → … → 8×2）；Optuna 可搜 **3～4 stage**（见 `configs/hpo.yaml` 的 `backbone_depth`）；
+2. **4×Stage（默认）**：每 stage 含 `blocks_per_stage` 个卷积/残差块 + **MaxPool(2)**，空间尺寸逐级减半（128×32 → 64×16 → … → 8×2）；Optuna 可搜 **3～4 stage**（见 `configs/hpo/hpo.yaml` 的 `backbone_depth`）；
 3. **Global Average Pooling**：将任意 stage 输出压成长度 = 末 stage 通道数的向量；
 4. **MLP 头**：Linear → ReLU → Dropout → Linear → **2 类 logits**。
 
@@ -316,7 +316,7 @@ t_min + W ≤ predict_ts ≤ t_max − H
 
 **注意**：修改 **`backbone_channels`、`blocks_per_stage`、`use_residual`** 等**仅影响模型结构**，**不必重跑 preprocess**，但**须重新训练**（checkpoint 须与当前 backbone 结构一致）。修改 **C/H/W** 相关项则须重跑 preprocess。
 
-默认 spatial 配置约 **19 个 Conv2d、~5.9M 参数**。结构超参可由 **`scripts/optuna.sh`** 搜索（见 `configs/hpo.yaml`）。
+默认 spatial 配置约 **19 个 Conv2d、~5.9M 参数**。结构超参可由 **`scripts/optuna.sh`** 搜索（见 `configs/hpo/hpo.yaml`）。
 
 ---
 

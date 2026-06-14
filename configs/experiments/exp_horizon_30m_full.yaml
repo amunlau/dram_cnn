@@ -1,0 +1,33 @@
+# 30 分钟预测窗 — 全量（换件/隔离提前量）
+# 前置：bash scripts/build_horizon_indexes.sh full
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_horizon_30m_full
+  data:
+    window_seconds: 1800
+    label_horizon_seconds: 1800
+    label_backtrace_seconds: 1800
+    max_index_rows: null
+    mcelog_max_rows: null
+    index_features_path: data/raw/features_index_h1800s_step600s_full.csv
+    drop_empty_mcelog_windows: true
+    drop_empty_positive_windows: true
+    processed_dir: data/processed_horizon_30m
+    split_strategy: sid
+    splits_dir: data/splits_horizon_30m_sid
+  train:
+    early_stop_metric: avg_precision
+    threshold_profile: recall_guard
+    imbalance:
+      positive_oversample_factor: 2
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
+    num_workers: 2
+    prefetch_factor: 2

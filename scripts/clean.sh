@@ -33,8 +33,17 @@ find runs -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
 mkdir -p runs/pipeline-logs/markers
 
 echo "=== 清理 data/processed*/ 与 data/splits*/（含 *.tmp / *.normtmp 半成品）==="
-rm -rf data/processed/* data/processed_smoke/* data/splits/* data/splits_smoke/* data/splits_sid/* data/splits_sid_smoke/* 2>/dev/null || true
-find data/processed data/processed_smoke data/splits data/splits_smoke data/splits_sid data/splits_sid_smoke -maxdepth 1 -type f \
+rm -rf data/processed/* data/processed_smoke/* \
+  data/processed_horizon_30m/* data/processed_horizon_30m_smoke/* \
+  data/processed_horizon_1h/* data/processed_horizon_1h_smoke/* \
+  data/splits/* data/splits_smoke/* data/splits_sid/* data/splits_sid_balanced/* \
+  data/splits_sid_smoke/* data/splits_horizon_30m_smoke/* data/splits_horizon_1h_smoke/* \
+  data/splits_horizon_30m_sid/* data/splits_horizon_1h_sid/* 2>/dev/null || true
+find data/processed data/processed_smoke data/processed_horizon_30m data/processed_horizon_30m_smoke \
+  data/processed_horizon_1h data/processed_horizon_1h_smoke \
+  data/splits data/splits_smoke data/splits_sid data/splits_sid_balanced data/splits_sid_smoke \
+  data/splits_horizon_30m_smoke data/splits_horizon_1h_smoke \
+  data/splits_horizon_30m_sid data/splits_horizon_1h_sid \
   \( -name '*.tmp' -o -name '*.normtmp' -o -name '*.tmp.npy' -o -name '*.normtmp.npy' \) -delete 2>/dev/null || true
 
 if [[ "${PURGE_INDEXES}" -eq 1 ]]; then
@@ -76,4 +85,5 @@ PY
 fi
 
 echo "Done. 重建冒烟: bash scripts/build_index.sh smoke && bash scripts/preprocess.sh configs/experiments/exp_baseline.yaml"
-echo "全量实验: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml"
+echo "全量 F1: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml"
+echo "工程向: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml  # 见 notebooks/05"

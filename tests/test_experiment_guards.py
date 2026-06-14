@@ -9,7 +9,7 @@ from dram2cnn.engine.validator import validate_experiment
 from dram2cnn.utils.config import load_experiment_config
 from dram2cnn.utils.experiment_guards import (
     assert_checkpoint_matches_experiment,
-    assert_full_best_index_not_stub,
+    assert_full_scale_index_not_stub,
     assert_predictions_match_experiment,
     assert_processed_matches_experiment,
     is_stub_index_path,
@@ -23,13 +23,28 @@ def test_is_stub_index_path() -> None:
     assert not is_stub_index_path("data/raw/features_index_h300s_step300s_full.csv")
 
 
-def test_assert_full_best_index_not_stub_raises() -> None:
+def test_assert_full_scale_index_not_stub_raises() -> None:
     cfg = {
-        "base": {"run_name": "exp_tianchi_full_best_ddp"},
-        "data": {"index_features_path": "data/index_stubs/features_5m_index_demo.csv"},
+        "base": {"run_name": "exp_tianchi_full_f1_ddp"},
+        "data": {
+            "index_features_path": "data/index_stubs/features_5m_index_demo.csv",
+            "max_index_rows": None,
+            "mcelog_max_rows": None,
+        },
     }
     with pytest.raises(RuntimeError, match="演示索引"):
-        assert_full_best_index_not_stub(cfg)
+        assert_full_scale_index_not_stub(cfg)
+
+
+def test_assert_full_scale_skips_smoke_truncation() -> None:
+    cfg = {
+        "base": {"run_name": "exp_tianchi_baseline"},
+        "data": {
+            "index_features_path": "data/index_stubs/features_5m_index_demo.csv",
+            "max_index_rows": 500,
+        },
+    }
+    assert_full_scale_index_not_stub(cfg)
 
 
 def test_assert_predictions_match_experiment_mismatch(tmp_path: Path) -> None:
@@ -54,13 +69,17 @@ def test_assert_predictions_match_requires_manifest_when_csv_exists(tmp_path: Pa
         assert_predictions_match_experiment(cfg, art, tmp_path)
 
 
-def test_preprocess_full_best_stub_raises() -> None:
+def test_preprocess_full_scale_stub_raises() -> None:
     cfg = {
-        "base": {"run_name": "exp_tianchi_full_best_ddp"},
-        "data": {"index_features_path": "data/index_stubs/features_5m_index_demo.csv"},
+        "base": {"run_name": "exp_tianchi_full_recall_ddp"},
+        "data": {
+            "index_features_path": "data/index_stubs/features_5m_index_demo.csv",
+            "max_index_rows": None,
+            "mcelog_max_rows": None,
+        },
     }
-    with pytest.raises(RuntimeError, match="run_preprocess"):
-        assert_full_best_index_not_stub(cfg, context="run_preprocess")
+    with pytest.raises(RuntimeError, match="演示索引"):
+        assert_full_scale_index_not_stub(cfg, context="run_preprocess")
 
 
 def test_validate_horizon_config_only_with_no_require_splits(tmp_path: Path) -> None:

@@ -33,7 +33,7 @@ from dram2cnn.engine.imbalance import (
     focal_gamma_from_cfg,
     positive_oversample_factor_from_cfg,
 )
-from dram2cnn.engine.metrics import classification_metrics, search_best_threshold
+from dram2cnn.engine.metrics import classification_metrics, search_threshold
 from dram2cnn.models.factory import build_model
 from dram2cnn.models.losses import classification_loss
 from dram2cnn.utils.device import resolve_device
@@ -103,11 +103,29 @@ def _early_stop_score(
         x = float(roc_auc_val) if roc_auc_val is not None else -1.0
     elif early_stop_metric == "avg_precision":
         x = float(ap_val) if ap_val is not None else -1.0
+    elif early_stop_metric == "best_recall":
+        x = float(m_best["recall"])
     elif early_stop_metric == "f1_at_0p5":
         x = float(m_at_05["f1"])
     else:
         raise ValueError(f"unexpected early_stop_metric for scoring: {early_stop_metric!r}")
     return x if math.isfinite(x) else -1.0
+
+
+def _threshold_search_args(train_cfg: dict) -> tuple[float, float, float, dict]:
+    ts = train_cfg.get("threshold_search") or {}
+    kw = {
+        "objective": str(ts.get("objective", "f1")),
+        "min_precision": float(ts.get("min_precision", 0.0)),
+        "min_recall": float(ts.get("min_recall", 0.0)),
+        "f_beta": float(ts.get("f_beta", 1.0)),
+    }
+    return (
+        float(ts.get("min", 0.1)),
+        float(ts.get("max", 0.9)),
+        float(ts.get("step", 0.02)),
+        kw,
+    )
 
 
 def _plot_curve(x, y, title: str, ylabel: str, out_png: Path) -> None:
@@ -335,8 +353,8 @@ def train_model(
     patience = int(train_cfg.get("patience", 50))
     max_grad_norm = train_cfg.get("max_grad_norm", 1.0)
     early_stop_metric = str(train_cfg.get("early_stop_metric", "best_f1")).lower()
-    if early_stop_metric not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision"}:
-        raise ValueError("train.early_stop_metric must be one of: best_f1, roc_auc, f1_at_0p5, avg_precision")
+    if early_stop_metric not in {"best_f1", "roc_auc", "f1_at_0p5", "avg_precision", "best_recall"}:
+        raise ValueError("train.early_stop_metric must be one of: best_f1, roc_auc, f1_at_0p5, avg_precision, best_recall")
     if _is_main_process() and logger is not None:
         logger.info(
             "Early stopping: metric=%s patience=%d（该标量越大越好；连续 patience 轮无提升则停止）。"
@@ -412,12 +430,14 @@ def train_model(
                 eval_model = model.module if isinstance(model, DDP) else model
                 ys, yp, yprob = _collect_eval(eval_model, val_dl, dev)
                 m_at_05 = classification_metrics(ys, yp, yprob)
-                best_t = search_best_threshold(
+                t_min, t_max, t_step, t_kw = _threshold_search_args(train_cfg)
+                best_t = search_threshold(
                     np.asarray(ys),
                     np.asarray(yprob),
-                    float(train_cfg.get("threshold_search", {}).get("min", 0.1)),
-                    float(train_cfg.get("threshold_search", {}).get("max", 0.9)),
-                    float(train_cfg.get("threshold_search", {}).get("step", 0.02)),
+                    t_min,
+                    t_max,
+                    t_step,
+                    **t_kw,
                 )
                 m_best = _metrics_at_threshold(ys, yprob, best_t["threshold"])
 
@@ -465,6 +485,14 @@ def train_model(
                         float(stop_score),
                         epoch_seconds,
                     )
+                    if t_kw.get("objective") != "f1":
+                        logger.info(
+                            "  threshold_objective=%s val_recall=%.4f val_precision=%.4f @t=%.4f",
+                            t_kw.get("objective"),
+                            float(m_best["recall"]),
+                            float(m_best["precision"]),
+                            float(best_t["threshold"]),
+                        )
 
                 yprob_finite = bool(np.isfinite(np.asarray(yprob, dtype=float)).all())
                 if stop_score > best_score and _is_valid_early_stop_score(stop_score) and yprob_finite:
@@ -528,12 +556,14 @@ def train_model(
     ts_cfg = train_cfg.get("threshold_search", {})
     if _is_main_process() and bool(ts_cfg.get("enabled", True)) and (run_dir / "val_predictions.csv").exists():
         vdf = pd.read_csv(run_dir / "val_predictions.csv")
-        best_t = search_best_threshold(
+        t_min, t_max, t_step, t_kw = _threshold_search_args(train_cfg)
+        best_t = search_threshold(
             vdf["y_true"].to_numpy(),
             vdf["y_prob"].to_numpy(),
-            float(ts_cfg.get("min", 0.1)),
-            float(ts_cfg.get("max", 0.9)),
-            float(ts_cfg.get("step", 0.02)),
+            t_min,
+            t_max,
+            t_step,
+            **t_kw,
         )
         dump_json(run_dir / "best_threshold.json", best_t)
 

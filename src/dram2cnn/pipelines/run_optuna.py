@@ -3,9 +3,9 @@ from __future__ import annotations
 """Optuna 驱动的 GridCNN-Deep 超参搜索。
 
 前置：已对目标实验完成 preprocess + validate（存在 `data/splits/`）。
-每个 trial 在 `runs/optuna/<study>/<trial_id>/` 落盘；训练经 subprocess 调用 `run_train`（与 `train.sh` 相同 DDP / 显存策略）。
+每个 trial 在 ``runs/optuna/<study>/trialXXXX/`` 落盘；训练经 subprocess 调用 ``run_train``（与 ``train.sh`` 相同 DDP / 显存策略）。
 
-可搜结构超参（见 `configs/hpo.yaml`）：
+可搜结构超参（见 ``configs/hpo/hpo.yaml``）：
 - `backbone_depth` → 写入 `model.backbone_channels`（stage 数 = 列表长度）；
 - `blocks_per_stage` / `use_residual`：控制每个 stage 内卷积块数与是否残差；
 - `conv_kernel_size`、`head_hidden`、`dropout`：卷积核与 MLP 头；
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 用法：
   PYTHONPATH=src python3 -m dram2cnn.pipelines.run_optuna \\
-    configs/experiments/exp_optuna_smoke.yaml configs/hpo.yaml
+    configs/experiments/exp_optuna_smoke.yaml configs/hpo/hpo.yaml
 """
 
 import argparse
@@ -34,7 +34,7 @@ from dram2cnn.utils.config import deep_update, load_experiment_config, load_yaml
 from dram2cnn.utils.gpu_launch import resolve_launch_plan_from_cfg
 from dram2cnn.utils.io import dump_json
 from dram2cnn.utils.logger import get_logger
-from dram2cnn.utils.run_layout import resolve_train_run_dir
+from dram2cnn.utils.run_layout import read_pointer_dir, resolve_train_run_dir
 from dram2cnn.utils.seed import set_seed
 
 
@@ -44,6 +44,7 @@ def _run_trial_training(root: Path, exp_config: str, trial_cfg: dict, run_dir: P
     plan = resolve_launch_plan_from_cfg(trial_cfg, "train")
     env = os.environ.copy()
     env["DRAM2CNN_CONFIG_SNAPSHOT"] = str(run_dir / "config_snapshot.json")
+    env["DRAM2CNN_TRAIN_SESSION"] = run_dir.name
     if plan.batch_size_auto:
         env["DRAM2CNN_BATCH_SIZE"] = str(plan.batch_size)
 
@@ -149,7 +150,7 @@ def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
     """运行 Optuna study：每个 trial 训练 GridCNN-Deep 并返回 HPO `metric` 列上的最优验证分数。
 
     前置：`data/splits/` 已存在且通过 `validate_experiment`。
-    产物：`runs/optuna/<study_name>/best_trial.json` 与各 trial 的 `runs/<run_name>/` 目录。
+    产物：`runs/optuna/<study_name>/best_trial.json` 与各 trial 的 `runs/optuna/<study_name>/trialXXXX/` 目录。
     """
     root = project_root()
     base_cfg = load_experiment_config(exp_config)
@@ -182,7 +183,7 @@ def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
             trial_cfg,
             {
                 "base": {
-                    "run_name": f"{study_name}_trial{trial.number:04d}",
+                    "run_name": f"optuna/{study_name}/trial{trial.number:04d}",
                     "seed": seed + trial.number,
                 },
                 "train": {
@@ -209,6 +210,11 @@ def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
 
         _run_trial_training(root, exp_config, trial_cfg, run_dir)
         score = _read_best_score(run_dir, metric)
+        if not np.isfinite(score):
+            run_root = root / "runs" / str(trial_cfg["base"]["run_name"])
+            ptr = read_pointer_dir(run_root, ".latest_train_session", "latest_train")
+            if ptr is not None and ptr != run_dir:
+                score = _read_best_score(ptr, metric)
         trial.set_user_attr("run_dir", str(run_dir))
         logger.info("Optuna trial %d finished %s=%.6f", trial.number, metric, score)
         if not np.isfinite(score):
@@ -264,7 +270,7 @@ def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Optuna GridCNN 超参搜索")
     ap.add_argument("exp_config", nargs="?", default="configs/experiments/exp_optuna_smoke.yaml")
-    ap.add_argument("hpo_config", nargs="?", default="configs/hpo.yaml")
+    ap.add_argument("hpo_config", nargs="?", default="configs/hpo/hpo.yaml")
     args = ap.parse_args()
     run_study(args.exp_config, args.hpo_config)
 

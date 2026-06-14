@@ -3,7 +3,7 @@ from __future__ import annotations
 """模型训练命令行入口。
 
 流程概要（rank0）：
-1. ``assert_full_best_index_not_stub``：全量实验不得误用演示索引。
+1. ``assert_full_scale_index_not_stub``：全量实验不得误用演示索引。
 2. ``warn_unstable_deep_focal_combo``：Deep + Focal 组合预警。
 3. ``validate_experiment``：确认 ``data/splits/`` 与 ``model`` 形状一致。
 4. 写入 ``config_snapshot.json``（供 infer 比对 checkpoint 来源）。
@@ -33,7 +33,7 @@ from dram2cnn.utils.run_layout import (
     resolve_train_run_dir,
     train_log_path,
 )
-from dram2cnn.utils.experiment_guards import assert_full_best_index_not_stub, warn_unstable_deep_focal_combo
+from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub, warn_unstable_deep_focal_combo
 from dram2cnn.utils.seed import set_seed
 from dram2cnn.utils.training_data_audit import log_dataset_health_for_train
 
@@ -59,7 +59,7 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
     logger = get_logger(log_path) if rank == 0 else None
 
     if rank == 0:
-        assert_full_best_index_not_stub(cfg, context="run_train")
+        assert_full_scale_index_not_stub(cfg, context="run_train")
         warn_unstable_deep_focal_combo(cfg, logger)
         validate_experiment(cfg, require_splits=True)
         dump_json(run_dir / "config_snapshot.json", cfg)

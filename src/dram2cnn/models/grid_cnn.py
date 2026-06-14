@@ -21,7 +21,7 @@ CE 在 row/col/bank 上具有 multi-scale 空间模式，因此采用深度 back
       → AdaptiveAvgPool2d(1,1)
       → Linear → [N,2]
 
-配置见 `configs/model.yaml`；结构超参搜索见 `configs/hpo.yaml` 与 `run_optuna.py`。
+配置见 `configs/model.yaml`；结构超参搜索见 `configs/hpo/hpo.yaml` 与 `run_optuna.py`。
 """
 
 import torch

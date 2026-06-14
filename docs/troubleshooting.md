@@ -93,20 +93,21 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 
 - **因果链**：GridCNN-Deep（`configs/model.yaml`，约 590 万参数）在 **`focal_gamma>0` + 默认 `lr=0.001`** 下，常在第 2 个 optimizer step 梯度变 NaN → checkpoint 损坏 → infer 的 `y_prob` 全 NaN → evaluate 失败。
 - **数据侧通常正常**：`data/splits/X_*.npy` 无 NaN；勿误判为 preprocess 问题。
-- **处理（全量实验）**：`exp_full_best_ddp.yaml` 已默认 `focal_gamma: 0.0`、`weight_scheme: sqrt`（与冒烟 baseline 一致）。若自行改回 Focal，须同时降低 `train.lr` 并监控首轮 loss。
-- **重跑**：删除 `runs/pipeline-logs/markers/full_best__train.done` 与 `full_best__infer.done`，再 `bash scripts/train_ddp.sh configs/experiments/exp_full_best_ddp.yaml` → infer → evaluate。
-- **代码守卫**：`trainer.py` 在 loss/grad/权重非有限时 abort，且仅在有效早停分数时保存 best；`predictor.py` 加载 checkpoint 后校验权重有限、写出前校验 `y_prob`；`evaluator.py` 对 NaN `y_prob` 报错；`run_infer.py` 比对 `config_snapshot.json` 与当前实验 model 配置。
+- **处理（全量实验）**：`exp_full_f1_ddp.yaml` / `exp_full_recall_ddp.yaml` 等已默认 `focal_gamma: 0.0`。
+- **重跑**：删除对应 marker（如 `full_f1__train.done`），再 `bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml` → infer → evaluate。
 
-## 训练结束找不到 `checkpoints/grid_cnn.pt`
+## `bash scripts/clean.sh` 后全量实验 YAML 能否加载？
 
-- 验证 PR-AUC 为 nan 时，**不再**用 `-1.0` 占位分数保存 best；仅在指标有效或最后一轮权重有限时落盘。若训练发散，日志会有 `non-finite loss/grad` 或末尾 `without a valid checkpoint` 报错。
+- **可以**：`load_experiment_config` 对 `data/raw/features_index_*_full.csv` **允许暂缺**（clean 后正常）。
+- **不能 preprocess**：`check_preprocess_raw_inputs` 会在缺索引时 fail-fast，并提示 **`bash scripts/build_index.sh full`**。
+- **冒烟不受影响**：`data/index_stubs/features_5m_index_demo.csv` 仍须存在（`build_index.sh smoke` 可重建）。
 
-## `exp_full_best_ddp` 与演示索引
+## 全量实验与演示索引
 
-- 仓库默认的 `exp_full_best_ddp.yaml` 已在 **`overrides.data.index_features_path`** 指向 `data/raw/features_index_h300s_step300s_full.csv`，并取消 `max_index_rows` / `mcelog_max_rows` 截断。
-- 若路径仍含 `index_stubs` / `features_5m_index_demo`，**`run_preprocess` / `run_train` / `train_ddp.sh` 会 RuntimeError**（`assert_full_best_index_not_stub`）。
-- **全量流程**：`bash scripts/build_index.sh full` → 清空 `data/processed/*`、`data/splits/*` → `bash scripts/preprocess.sh configs/experiments/exp_full_best_ddp.yaml`。manifest 仍约 500 行时，通常是未重跑 preprocess 或磁盘仍是 baseline 产物。
-- **训练启动时**：rank0 会打 **`数据摘要`**（`log_dataset_health_for_train`），含 `index_features_path`、manifest `n_samples`、train/val 正例数；路径含 stub 时会 **WARNING**。
+- 凡 **无** `max_index_rows` / `mcelog_max_rows` 截断的全量 yaml，其 `index_features_path` 须指向 `data/raw/features_index_*_full.csv`。
+- 若仍指向 `index_stubs`，**preprocess / train / train_ddp.sh 会 RuntimeError**（`assert_full_scale_index_not_stub`）。
+- **全量 F1 流程**：`bash scripts/build_index.sh full` → 清空 `data/processed/*`、`data/splits/*` → `bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml`。
+- **工程向流程**（Notebook **05**）：`exp_full_recall_ddp.yaml`（`drop_empty_positive_windows: true`），与 F1 preprocess **不可混用**。
 
 ## 预处理前缺文件 / 长时间读 mcelog 后才失败
 

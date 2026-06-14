@@ -110,7 +110,7 @@ def test_materialize_parallel_matches_serial(tmp_path: Path):
         columns=["sid", "failure_type", "failed_time"],
     ).to_csv(raw / "tickets.csv", index=False)
 
-    base = pd.Timestamp("2000-01-01 12:00:00")
+    base = pd.Timestamp("2000-01-01 00:06:00")
     idx_rows = [["S1", (base + pd.Timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S")] for i in range(40)]
     pd.DataFrame(idx_rows, columns=["sid", "predict_time"]).to_csv(raw / "index.csv", index=False)
 

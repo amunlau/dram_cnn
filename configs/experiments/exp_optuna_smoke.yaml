@@ -16,6 +16,8 @@ overrides:
     label_horizon_seconds: 300
     label_backtrace_seconds: 300
     index_features_path: data/index_stubs/features_5m_index_demo.csv
+    processed_dir: data/processed_smoke
+    splits_dir: data/splits_smoke
   train:
     epochs: 40
     patience: 8
