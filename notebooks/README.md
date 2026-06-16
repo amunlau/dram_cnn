@@ -42,6 +42,7 @@ Jupyter 工作流与命令行 **`scripts/*.sh`** 共用同一套配置（`config
 
 - 共享 preprocess（marker `full_eng`）；`drop_empty_positive_windows: true`
 - 对比表：`outputs/tables/full_recall_vs_precision_deployment_kpi.csv`
+- **平衡工程向**（CLI 可选）：`exp_full_recall_*_balanced.yaml`（`threshold_profile: balanced`），无独立 Notebook 单元；阈值见 `configs/threshold_profiles.yaml`
 
 ---
 
@@ -81,12 +82,20 @@ flowchart TD
 
 ## 环境与 Docker
 
+各 Notebook **setup 首格**应完成三件事：
+
+1. `notebook_setup()` — 设置 `PYTHONPATH`、清除 dram2cnn 模块缓存、返回 canonical `project_root()`  
+2. **统一 import** — 本 notebook 后续单元用到的 `load_experiment_config`、`run_step`、`preflight_*` 等  
+3. **实验常量** — 如 `FULL_CFG`、`RECALL_TIME_CFG`（04/05），避免跳格运行 `NameError`
+
+`01_eda.ipynb` 仅需推断仓库根目录（不 import 业务模块），setup 仅设置 `sys.path` 并调用 `infer_project_root()`。
+
 ```bash
-export PYTHONPATH=src   # Notebook 首格通常会自动加入 src
+export PYTHONPATH=src   # setup 首格通常会自动设置
 ```
 
 - **`docker compose up`** → JupyterLab **http://localhost:9999**（工作目录挂载仓库根）。
-- 修改 Python 源码后：**Kernel → Restart** 再跑，避免旧模块缓存。
+- 修改 Python 源码后：先重跑各 Notebook **setup 首格**（调用 `notebook_setup()`），或 **Kernel → Restart**，避免 `ImportError`（旧 `sys.modules` 缓存）。
 - 预处理并行度见 `configs/data.yaml` 的 `preprocess_workers` / `preprocess_parallel_frac` / `ram_budget_frac`；manifest 中 `preprocess_workers_requested`、`ram_budget_gib`、`preprocess_estimated_peak_gib`、`split_normalize_estimated_peak_gib`、`preprocess_ram_budget_exceeded` 等标明实际并行与内存预算。
 
 ## 输出目录
@@ -95,15 +104,19 @@ export PYTHONPATH=src   # Notebook 首格通常会自动加入 src
 |------|------|
 | `outputs/` | 01–03 分析 Notebook 的表格与图（见 `outputs/README.md`） |
 | `runs/` | 训练 checkpoint、predictions、流水线日志 |
-| `data/processed/`、`data/splits/`、`data/splits_sid/` | 预处理与切分（time / sid 实验分别读对应 splits_dir） |
+| `data/processed/`、`data/splits/` | 全量 F1 / 工程向默认预处理与切分 |
+| `data/processed_smoke/`、`data/splits_smoke/` | 冒烟（`exp_baseline`） |
+| `data/splits_sid/` 等 | sid 切分（读实验 YAML 的 `splits_dir`） |
 
 演示索引重建：**`bash scripts/build_index.sh smoke`**
 
 ## 命令行批量（无 Notebook）
 
-全量 F1 + 召回/精度六组实验一键跑通：
+全量 F1 + 工程向六组实验（**须先** `build_index.sh full` 与工程向 preprocess，见脚本头注释）：
 
 ```bash
+bash scripts/build_index.sh full
+bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml
 bash scripts/run_full_notebook_batch.sh
 ```
 

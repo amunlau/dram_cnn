@@ -136,8 +136,8 @@ bash scripts/verify_ddp.sh
 ```bash
 # 生成 30min/10min 步长冒烟索引（与 exp_horizon_30m.yaml 默认路径一致）
 bash scripts/build_horizon_indexes.sh smoke
-# 切换 horizon 前清空旧产物
-rm -rf data/processed/* data/splits/*
+# 切换 horizon 前清空该实验的 processed/splits 目录（30min 冒烟示例）
+rm -rf data/processed_horizon_30m_smoke/* data/splits_horizon_30m_smoke/*
 bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 ```
 

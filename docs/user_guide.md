@@ -15,7 +15,7 @@
 | 输入张量 `X` | `[N, 31, 128, 32]`（16 bank + 15 inventory 通道的空间热图） |
 | 模型 | **GridCNN-Deep**（2D-CNN） |
 
-**重要约定**：修改索引表、horizon、网格表示或 `model.yaml` 中的 C/H/W 后，必须**清空 `data/processed`、`data/splits` 并重跑 preprocess**，否则训练/推理会与磁盘数据不一致。
+**重要约定**：修改索引表、horizon、网格表示或 `model.yaml` 中的 C/H/W 后，必须**清空该实验 YAML 所指向的 `processed_dir`、`splits_dir` 并重跑 preprocess**（冒烟默认 `data/processed_smoke`、`data/splits_smoke`；全量 F1/工程向默认 `data/processed`、`data/splits`），否则训练/推理会与磁盘数据不一致。
 
 ---
 
@@ -111,9 +111,9 @@ PYTHONPATH=src python3 scripts/build_index.py --mode full \
 |-----------|------|
 | `exp_baseline.yaml` | **冒烟默认**：索引 ~500 行；产物 **`data/processed_smoke/`、`data/splits_smoke/`** |
 | `exp_full_f1_ddp.yaml` / `exp_full_f1_sid.yaml` | **全量 F1 最大化**（项目 KPI）；`early_stop_metric: best_f1`；Notebook **`04_run_pipelines.ipynb`** |
-| `exp_full_recall_ddp.yaml` / `exp_full_recall_sid.yaml` | **全量召回率优先**；`threshold_profile: recall_guard`；Notebook **`05_full_recall_vs_precision.ipynb`** |
+| `exp_full_recall_ddp.yaml` / `exp_full_recall_sid.yaml` | **全量召回率优先**；`threshold_profile: recall_guard`（实验内 `min_precision: 0.55` 覆盖模板默认 0.50）；Notebook **05** |
 | `exp_full_precision_ddp.yaml` / `exp_full_precision_sid.yaml` | **全量精度优先**；`threshold_profile: precision_guard`；Notebook **05** |
-| `exp_full_recall_ddp_balanced.yaml` / `exp_full_recall_sid_balanced.yaml` | 平衡工程向（recall≥0.82 且 precision 下限） |
+| `exp_full_recall_ddp_balanced.yaml` / `exp_full_recall_sid_balanced.yaml` | 平衡工程向（`threshold_profile: balanced`；`min_recall≥0.82` 且 `min_precision≥0.58`，见 `threshold_profiles.yaml`） |
 | `exp_baseline_sid.yaml` | 冒烟 + **sid 切分** |
 | `exp_ddp_verify.yaml` | 短 epoch 多卡 DDP 回归 |
 | `exp_horizon_30m.yaml` / `exp_horizon_1h.yaml` | Horizon 冒烟对比 |
@@ -151,10 +151,12 @@ bash scripts/preprocess.sh configs/experiments/exp_baseline.yaml
 
 结束时打印 `Validate after preprocess: ok` 表示 splits 与配置已对齐。
 
-产出：
+产出（以 **`exp_baseline.yaml`** 为例，目录由实验 overrides 决定）：
 
-- `data/processed/`：`X.npy`, `y.npy`, `meta.csv`, `preprocess_manifest.json`
-- `data/splits/`：`X_train.npy`、`X_val.npy`、`X_test.npy` 等（已按训练集标准化）
+- `data/processed_smoke/`：`X.npy`, `y.npy`, `meta.csv`, `preprocess_manifest.json`
+- `data/splits_smoke/`：`X_train.npy`、`X_val.npy`、`X_test.npy` 等（已按训练集标准化）
+
+全量 F1 / 工程向实验默认写入 `data/processed/`、`data/splits/`（sid 实验另用 `data/splits_sid/` 等）。**一律以当前实验 YAML 的 `processed_dir` / `splits_dir` 为准**。
 
 预处理前会自动检查 raw 路径是否存在；Linux 上对「按 sid 排序」「填网格」可多进程加速（见 manifest 中并行标记）。
 
@@ -281,7 +283,7 @@ bash scripts/evaluate.sh configs/experiments/exp_full_f1_sid.yaml
 |------|------|-----|
 | 召回率优先 | `exp_full_recall_ddp.yaml` | `exp_full_recall_sid.yaml` |
 | 精度优先 | `exp_full_precision_ddp.yaml` | `exp_full_precision_sid.yaml` |
-| 平衡（CLI 可选） | `exp_full_recall_ddp_balanced.yaml` | `exp_full_recall_sid_balanced.yaml` |
+| 平衡（CLI 可选） | `exp_full_recall_ddp_balanced.yaml` | `exp_full_recall_sid_balanced.yaml`（`min_recall=0.82`，`min_precision=0.58`） |
 
 Horizon 全量：`exp_horizon_30m_full.yaml`、`exp_horizon_1h_full.yaml`（需 `build_horizon_indexes.sh full`）。
 
@@ -334,7 +336,7 @@ bash scripts/train_ddp.sh configs/experiments/exp_horizon_30m_full.yaml
 
 ## 8. Optuna 超参搜索
 
-**前置**：已对目标实验完成 preprocess（存在 `data/splits/`）。
+**前置**：已对目标实验完成 preprocess（存在该实验 YAML 的 `splits_dir`；冒烟默认 `data/splits_smoke/`）。
 
 ```bash
 bash scripts/optuna.sh \
@@ -366,11 +368,10 @@ bash scripts/optuna.sh \
 | `optuna.sh [exp] [hpo]` | 超参搜索 | `exp_optuna_smoke.yaml` |
 | `autotune.sh` | 一键冒烟全流程 | 见 `src/dram2cnn/pipelines/run_autotune.py` 的 `EXPS` |
 | `clean.sh [--notebooks] [--purge-indexes]` | 清理 runs、processed/splits、outputs、缓存；`--notebooks` 清 Notebook 输出；`--purge-indexes` 才删 raw 全量索引 | — |
-| `run_full_notebook_batch.sh` | 全量 F1 + 召回/精度批量流水线 | — |
+| `run_full_notebook_batch.sh` | 全量工程向 + F1 六组批量（须先 `build_index.sh full` 与工程向 preprocess，见脚本头注释） | — |
 | `verify_ddp.sh` | 多卡 DDP 回归（train/infer/optuna） | `exp_ddp_verify.yaml` |
-
-合并部署 KPI：`python3 -m dram2cnn.utils.deployment_kpi`。
-| `inspect_data.sh` | 查看 processed 概览 | — |
+| `inspect_data.sh` | 查看实验 `processed_dir` 概览 | — |
+| `python3 -m dram2cnn.utils.deployment_kpi` | 合并 `outputs/tables/*_deployment_kpi.csv` | — |
 
 等价 Python 模块（需 `PYTHONPATH=src`）：
 
@@ -396,8 +397,11 @@ workspace/
 ├── data/
 │   ├── raw/                 # mcelog、tickets、inventory、全量索引
 │   ├── index_stubs/         # 冒烟索引
-│   ├── processed/           # 预处理全量池 X/y/meta/manifest
-│   └── splits/              # train/val/test 切分（训练实际读取）
+│   ├── processed/           # 全量默认预处理池（冒烟见 processed_smoke/）
+│   ├── processed_smoke/     # exp_baseline 等冒烟产物
+│   ├── splits/              # 全量默认切分
+│   ├── splits_smoke/        # 冒烟切分
+│   └── splits_sid/          # sid 切分（全量 sid 实验）
 ├── runs/
 │   └── <run_name>/          # 训练/推理会话、checkpoint、predictions
 ├── scripts/                 # 入口 shell
@@ -427,7 +431,7 @@ workspace/
 | `model.yaml` 仅 backbone 结构 | 仅 train（不必 preprocess） |
 | `train.yaml` 学习率、epoch 等 | 仅 train |
 
-重跑 preprocess 前建议删除 `data/processed/*` 与 `data/splits/*`，避免 marker 或旧文件干扰。
+重跑 preprocess 前建议清空**当前实验**的 `processed_dir` 与 `splits_dir`（全量默认 `data/processed/*`、`data/splits/*`；冒烟为 `processed_smoke/*`、`splits_smoke/*`），避免 marker 或旧文件干扰。
 
 ### 11.2 baseline 与 full 并行维护
 
@@ -527,7 +531,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
          04 F1 sid 或 05 召回/精度 sid
 ```
 
-修改 Python 源码后请 **Kernel → Restart** 再执行，避免缓存旧版 `dram2cnn`。
+修改 Python 源码后请 **重跑 setup 首格**（`notebook_setup()`）或 **Kernel → Restart**，避免缓存旧版 `dram2cnn`。
 
 ---
 

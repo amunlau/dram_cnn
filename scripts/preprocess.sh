@@ -4,8 +4,8 @@
 #
 # 【做什么】
 #   读取实验 YAML，运行与 `python3 -m dram2cnn.pipelines.run_preprocess` 相同的逻辑：
-#   生成 data/processed/（X.npy、y.npy、meta.csv、preprocess_manifest.json；tabular.npy 视配置）
-#   再写入 data/splits/，并对训练集拟合标准化（若配置启用），最后自动 validate（与 autotune 一致）。
+#   生成实验 YAML 中 data.processed_dir（X.npy、y.npy、meta.csv、preprocess_manifest.json；tabular.npy 视配置）
+#   再写入 data.splits_dir，并对训练集拟合标准化（若配置启用），最后自动 validate（与 autotune 一致）。
 #
 # 【怎么用】（可在任意当前目录执行；脚本会自动 cd 到仓库根目录）
 #   bash scripts/preprocess.sh

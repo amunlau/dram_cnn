@@ -28,7 +28,5 @@ overrides:
       positive_weight_cap: 30.0
       focal_gamma: 0.0
     threshold_profile: balanced
-    threshold_search:
-      min_precision: 0.55
     num_workers: 2
     prefetch_factor: 2

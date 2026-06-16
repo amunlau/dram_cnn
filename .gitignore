@@ -4,18 +4,22 @@
 __pycache__/
 *.py[cod]
 *.so
+*.egg
 *.egg-info/
 .Python
+dist/
+build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .pyre/
 .hypothesis/
+.tox/
+.nox/
 .coverage
 .coverage.*
 htmlcov/
 .ipynb_checkpoints/
-**/.ipynb_checkpoints/
 .cache/
 
 # =========================
@@ -31,15 +35,29 @@ ENV/
 # =========================
 .env
 .env.*
+!.env.example
 .envrc
 pip.conf
 
 # =========================
 # Data artifacts (AI/ML)
 # =========================
+# 赛题原始 CSV 与可再生全量索引（保留占位 .gitkeep）
 data/raw/**
-data/processed/**
-data/splits/**
+!data/raw/.gitkeep
+
+# 预处理 / 切分产物：含 processed_smoke、processed_horizon_*、splits_sid* 等变体
+data/processed*/
+data/splits*/
+data/artifacts/
+
+# preprocess 并行写盘时的半成品（clean.sh 亦会删除）
+data/**/*.tmp
+data/**/*.normtmp
+data/**/*.tmp.npy
+data/**/*.normtmp.npy
+
+# data/index_stubs/ 下演示索引 intentionally tracked（小 CSV，未列入 ignore）
 !data/README.md
 !data/**/.gitkeep
 
@@ -81,12 +99,16 @@ wandb/**
 *.pkl
 *.h5
 *.hdf5
+*.safetensors
 
 # =========================
 # IDE / OS noise
 # =========================
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
 .idea/
 .vscode/
 .cursor/

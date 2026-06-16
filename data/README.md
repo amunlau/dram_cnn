@@ -11,8 +11,22 @@
   bash scripts/build_index.sh smoke
   bash scripts/build_horizon_indexes.sh smoke   # 批量 5min/30min/1h 冒烟索引
   ```
-- **`processed/`**：`X.npy`、`y.npy`、`meta.csv`、`preprocess_manifest.json`；**`tabular.npy` 按配置可有可无**。
-- **`splits/`**：train/val/test 切分及 `normalization_stats.json`，由 `scripts/preprocess.sh` 写入。
+
+## 预处理与切分目录（由实验 YAML 决定）
+
+| 场景 | 典型 `processed_dir` | 典型 `splits_dir` |
+|------|----------------------|-------------------|
+| 冒烟 baseline | `data/processed_smoke/` | `data/splits_smoke/` |
+| 全量 F1 / 工程向 | `data/processed/` | `data/splits/` |
+| 全量 sid | `data/processed/`（共用） | `data/splits_sid/` 等 |
+| Horizon 30min 冒烟 | `data/processed_horizon_30m_smoke/` | `data/splits_horizon_30m_smoke/` |
+
+各目录内常见文件：
+
+- **`processed*`**：`X.npy`、`y.npy`、`meta.csv`、`preprocess_manifest.json`；**`tabular.npy` 按配置可有可无**。
+- **`splits*`**：train/val/test 切分及 `normalization_stats.json`，由 `scripts/preprocess.sh` 写入。
+
+**不要假设**所有实验都写入 `data/processed/` 与 `data/splits/`；以当前实验 YAML 的 `overrides.data.processed_dir` / `splits_dir` 为准。
 
 ## 索引表与设计空间
 
@@ -27,4 +41,4 @@
 
 生成后在实验 yaml 的 `overrides.data.index_features_path` 中指向该 CSV 并 **重跑 preprocess**（全量示例：`exp_full_f1_ddp.yaml` 或 `exp_full_recall_ddp.yaml`）。
 
-字段与形状见 `docs/data_dictionary.md`、`docs/data_processing_guide.md`。
+字段与形状见 `docs/data_dictionary.md`、`docs/data_processing_guide.md`.
