@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# 全量 Notebook 实验批量：召回 / 精度 / F1（time + sid）
+# 全量 CLI 批量：工程向（召回/精度 time+sid）→ F1 最大化（time+sid）
+#
+# 前置（Phase A 工程向）：
+#   bash scripts/build_index.sh full
+#   bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml
+#   （工程向 preprocess：drop_empty_positive_windows=true，与 F1 不可混用）
+#
+# Phase B 会清空 data/processed、splits、splits_sid 并重跑 F1 preprocess。
+#
 # 用法：bash scripts/run_full_notebook_batch.sh
 # 日志：runs/pipeline-logs/full_notebook_batch.log
 set -euo pipefail
@@ -18,7 +26,15 @@ run() {
   "$@"
 }
 
-# ---------- Phase A: 工程向（复用现有 processed + splits）----------
+PROC_MAN="${PROJECT_ROOT}/data/processed/preprocess_manifest.json"
+if [[ ! -f "${PROC_MAN}" ]]; then
+  echo "错误：缺少 ${PROC_MAN}" >&2
+  echo "请先：bash scripts/build_index.sh full" >&2
+  echo "      bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml" >&2
+  exit 1
+fi
+
+# ---------- Phase A: 工程向（复用工程向 preprocess 产物）----------
 step "Phase A: recall time"
 run bash scripts/train_ddp.sh configs/experiments/exp_full_recall_ddp.yaml
 run bash scripts/infer.sh configs/experiments/exp_full_recall_ddp.yaml

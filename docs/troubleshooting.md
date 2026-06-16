@@ -3,8 +3,8 @@
 ## 切换 horizon / 索引后 validate 报错
 
 - **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）；或 preprocess 报 **`索引 sidecar label_horizon_seconds=300 与当前配置 1800 不一致`**。  
-- **原因**：磁盘上 `data/processed` / 索引 sidecar 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
-- **处理**：`bash scripts/build_horizon_indexes.sh smoke`（或 `full`）→ 更新实验 YAML 的 `index_features_path` → `rm -rf data/processed/* data/splits/*` → **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
+- **原因**：磁盘上实验 `processed_dir` / 索引 sidecar 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
+- **处理**：`bash scripts/build_horizon_indexes.sh smoke`（或 `full`）→ 确认实验 YAML 的 `index_features_path` → 清空 **horizon 专用目录**（30min 冒烟：`data/processed_horizon_30m_smoke/*`、`data/splits_horizon_30m_smoke/*`）→ **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
 - **配置级预检**（尚未对该 horizon 重跑 preprocess）：**`bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml`**（跳过 manifest horizon 比对，仅检查 raw 路径与 processed 形状）。
 
 ## `use_weighted_sampler` 与 `positive_oversample_factor>1` 冲突
@@ -35,7 +35,7 @@
 - 调大 `mcelog_chunk_rows` 不一定减内存；可先设 `data.mcelog_max_rows`、`data.max_index_rows` 做子集试验。
 - 全量训练前将二者设为 `null`。
 - **耗时构成**：顺序扫描 **整表 mcelog** 写入 buckets → **按 sid 做时间排序** → **按索引行填网格 X**。后两段在 **Linux** 上均可按 `preprocess_workers` / `preprocess_parallel_frac` 多进程加速（`fork` + 写时复制）；`preprocess_workers: null` 时默认 **`preprocess_parallel_frac: 0.6`**（约 **60%** `os.cpu_count()` 逻辑核作为进程 budget，见 `dram2cnn.utils.preprocess_parallelism`）；manifest 中 `preprocess_events_finalize_parallel` / `preprocess_grid_fill_parallel` 标明是否启用。**顺序读 CSV** 本身仍为单线程流式读取。Windows / macOS 对上述两段保持单进程。
-- **同配置重跑 preprocess**：可直接再次 `bash scripts/preprocess.sh`；split 阶段会覆盖 `splits/` 并刷新归一化（无需手动删 `normalization_stats.json`）。更换索引/horizon/网格时仍须清空 `data/processed` 与 `data/splits`。
+- **同配置重跑 preprocess**：可直接再次 `bash scripts/preprocess.sh`；split 阶段会覆盖实验 `splits_dir` 并刷新归一化（无需手动删 `normalization_stats.json`）。更换索引/horizon/网格时仍须清空该实验的 `processed_dir` 与 `splits_dir`。
 - **64GB 机器 OOM（全量 preprocess）**：全量索引约 **66k 行**时，物化阶段会按索引行分配 X（约 **31 GiB**）；经 `drop_empty_mcelog_windows` 后落盘约 **35k 行 / ~17 GiB**（见 manifest `n_samples_before_drop` / `n_samples`）。默认 **`ram_budget_frac: 0.5`** 将 fork worker 压至 **1**；split/归一化已改为 **memmap + 分块写出 + 按通道归一化**（manifest 含 `split_normalize_estimated_peak_gib`）。启动日志「估算峰值仍超预算」针对 **物化阶段（66k + events）**，属保守预期。若仍 OOM：在**终端**跑 preprocess（勿在 Jupyter 内叠加 Kernel 内存）。**显存** batch 上限仍由 `gpu.vram_budget_frac: 0.8` 控制，与此无关。
 - 若日志出现 fork 与多线程告警，可在运行预处理前设 **`export OMP_NUM_THREADS=1`**（`scripts/lib/env_perf.sh` 已默认设置）。
 

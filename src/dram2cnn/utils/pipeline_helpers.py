@@ -10,6 +10,16 @@ from pathlib import Path
 import numpy as np
 
 from dram2cnn.utils.config import load_experiment_config, project_root
+from dram2cnn.utils.notebook_bootstrap import clear_dram2cnn_modules
+
+
+def reload_dram2cnn_modules() -> int:
+    """丢弃已 import 的 dram2cnn 子模块，便于 Notebook 长会话加载最新源码。
+
+    典型场景：内核启动后仓库更新了 ``experiment_guards`` 等模块，直接 ``from … import`` 新符号会 ImportError。
+    返回清除的模块数量。
+    """
+    return clear_dram2cnn_modules()
 
 
 def pipeline_log_dir(root: Path | None = None) -> Path:
@@ -68,14 +78,144 @@ def clear_exp_markers(exp_name: str, *, project_root_path: Path | None = None) -
     return removed
 
 
+
+def _data_dir_from_cfg(cfg: dict, key: str, root: Path) -> Path:
+    """``processed_dir`` / ``splits_dir``：相对传入 ``root`` 解析（兼容 config 已绝对化）。"""
+    p = Path(str(cfg["data"][key]))
+    repo = project_root()
+    if p.is_absolute():
+        try:
+            return root / p.relative_to(repo)
+        except ValueError:
+            return p
+    return root / p
+
+
+def processed_dir_for_exp(exp_yaml: str | Path, root: Path | None = None) -> Path:
+    """实验 YAML 中 ``data.processed_dir`` 的绝对路径。"""
+    root = root or project_root()
+    exp_path = Path(exp_yaml)
+    if not exp_path.is_absolute():
+        exp_path = root / exp_path
+    cfg = load_experiment_config(exp_path)
+    return _data_dir_from_cfg(cfg, "processed_dir", root)
+
+
 def splits_dir_for_exp(exp_yaml: str | Path, root: Path | None = None) -> Path:
     root = root or project_root()
     exp_path = Path(exp_yaml)
     if not exp_path.is_absolute():
         exp_path = root / exp_path
     cfg = load_experiment_config(exp_path)
-    p = Path(cfg["data"]["splits_dir"])
-    return p if p.is_absolute() else root / p
+    return _data_dir_from_cfg(cfg, "splits_dir", root)
+
+
+def have_processed_for_exp(exp_yaml: str | Path, root: Path | None = None) -> bool:
+    proc = processed_dir_for_exp(exp_yaml, root)
+    return (proc / "X.npy").is_file() and (proc / "y.npy").is_file()
+
+
+def have_splits_train_for_exp(exp_yaml: str | Path, root: Path | None = None) -> bool:
+    spl = splits_dir_for_exp(exp_yaml, root)
+    return (spl / "X_train.npy").is_file() and (spl / "y_train.npy").is_file()
+
+
+def have_feature_data_for_exp(exp_yaml: str | Path, root: Path | None = None) -> bool:
+    """``processed/X.npy`` 或 ``splits/X_train.npy`` 至少一组齐全。"""
+    return have_processed_for_exp(exp_yaml, root) or have_splits_train_for_exp(exp_yaml, root)
+
+
+def resolve_feature_xy_paths(
+    exp_yaml: str | Path,
+    *,
+    root: Path | None = None,
+    prefer_processed: bool = True,
+) -> tuple[Path, Path, str]:
+    """按实验配置解析特征 ``(X_path, y_path, source_label)``。
+
+    优先 ``processed_dir`` 下的全量池 ``X.npy``；否则回退 ``splits_dir/X_train.npy``。
+    两者均不存在时抛出 ``FileNotFoundError``。
+    """
+    root = root or project_root()
+    proc = processed_dir_for_exp(exp_yaml, root)
+    spl = splits_dir_for_exp(exp_yaml, root)
+    have_proc = have_processed_for_exp(exp_yaml, root)
+    have_spl = have_splits_train_for_exp(exp_yaml, root)
+
+    try:
+        proc_rel = proc.relative_to(root)
+    except ValueError:
+        proc_rel = proc
+    try:
+        spl_rel = spl.relative_to(root)
+    except ValueError:
+        spl_rel = spl
+
+    if prefer_processed and have_proc:
+        return (
+            proc / "X.npy",
+            proc / "y.npy",
+            f"{proc_rel}/（全量池，未按 train 重标准化）",
+        )
+    if have_spl:
+        return (
+            spl / "X_train.npy",
+            spl / "y_train.npy",
+            f"{spl_rel}/ 训练集（未找到 processed/X.npy；splitter 按 train 统计量标准化）",
+        )
+    if have_proc:
+        return proc / "X.npy", proc / "y.npy", f"{proc_rel}/（全量池）"
+
+    exp_path = Path(exp_yaml)
+    if not exp_path.is_absolute():
+        exp_path = root / exp_path
+    raise FileNotFoundError(
+        f"实验 {exp_path} 下未找到特征文件：\n"
+        f"  processed: {proc / 'X.npy'}\n"
+        f"  splits:    {spl / 'X_train.npy'}\n"
+        "请检查 data/raw/、实验 YAML 的 processed_dir/splits_dir，或重跑 preprocess。"
+    )
+
+
+def require_preprocess_manifest(
+    exp_yaml: str | Path,
+    *,
+    root: Path | None = None,
+    hint_cmd: str | None = None,
+) -> Path:
+    """resplit 等步骤前置：确认 ``processed_dir/preprocess_manifest.json`` 存在。"""
+    root = root or project_root()
+    proc = processed_dir_for_exp(exp_yaml, root)
+    man = proc / "preprocess_manifest.json"
+    if man.is_file():
+        return man
+    exp_path = Path(exp_yaml)
+    if not exp_path.is_absolute():
+        exp_path = root / exp_path
+    hint = hint_cmd or f"bash scripts/preprocess.sh {exp_path.relative_to(root)}"
+    raise RuntimeError(
+        f"缺少 {man}。\n"
+        f"请先对同一 processed_dir 完成 preprocess，例如：\n  {hint}"
+    )
+
+
+def preflight_full_scale_index(
+    exp_yaml: str | Path,
+    *,
+    root: Path | None = None,
+    context: str = "preflight",
+) -> dict:
+    """全量实验预检：刷新模块缓存并确认 ``index_features_path`` 非演示 stub。"""
+    reload_dram2cnn_modules()
+    from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub
+
+    root = root or project_root()
+    exp_path = Path(exp_yaml)
+    if not exp_path.is_absolute():
+        exp_path = root / exp_path
+    cfg = load_experiment_config(exp_path)
+    assert_full_scale_index_not_stub(cfg, context=context)
+    return cfg
 
 
 def preflight_splits_vs_model(exp_yaml: str | Path, root: Path | None = None) -> None:

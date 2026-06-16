@@ -136,7 +136,8 @@ Horizon 对比须先生成与实验 YAML 一致的索引，再更新 `index_feat
 ```bash
 bash scripts/build_horizon_indexes.sh smoke   # 冒烟 stub → data/index_stubs/
 bash scripts/build_horizon_indexes.sh full      # 全量 → data/raw/（耗时长）
-rm -rf data/processed/* data/splits/*           # 切换 horizon/索引前清空
+# 切换 horizon 前清空该实验 YAML 的 processed_dir / splits_dir（30min 冒烟示例）：
+rm -rf data/processed_horizon_30m_smoke/* data/splits_horizon_30m_smoke/*
 bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 ```
 

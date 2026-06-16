@@ -1,6 +1,6 @@
 # DRAM 网格 CNN 项目：配置体系详解（参考手册）
 
-> **2026-06 实验命名**：项目 KPI F1 见 `exp_full_f1_*`（Notebook **04**）；工程向召回/精度见 `exp_full_recall_*` / `exp_full_precision_*`（Notebook **05**）。下文「全量实验」以 `exp_full_recall_ddp.yaml` 为例（与 baseline 对照）。
+> **2026-06 实验命名**：项目 KPI F1 见 `exp_full_f1_*`（Notebook **04**）；工程向召回/精度见 `exp_full_recall_*` / `exp_full_precision_*`（Notebook **05**）。下文说明「全量数据定义」时以 **`exp_full_f1_ddp.yaml`**（KPI）与 **`exp_full_recall_ddp.yaml`**（工程向）为例；冒烟对照见 **`exp_baseline.yaml`**。
 > **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ---
@@ -402,7 +402,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 | `recall_first` | 在 `precision >= min_precision` 下最大化 recall |
 | `min_recall` | 在 `recall >= min_recall` 且 `precision >= min_precision` 下最大化 precision；若无满足者则逐级放宽（工程「宁报勿漏」） |
 
-**场景模板**：`configs/threshold_profiles.yaml` 定义 `recall_guard` / `balanced` / `precision_guard`。实验 yaml 在 `overrides.train.threshold_profile` 引用；同段内显式 `threshold_search` 子键会覆盖模板默认值。
+**场景模板**：`configs/threshold_profiles.yaml` 定义 `recall_guard` / `balanced` / `precision_guard`。实验 yaml 在 `overrides.train.threshold_profile` 引用；同段内显式 `threshold_search` 子键会覆盖模板默认值（例如 `exp_full_recall_ddp.yaml` 将 `recall_guard` 的 `min_precision` 从模板 **0.50** 提高到 **0.55**）。
 
 **工程向组合**：`exp_full_recall_*` / `exp_full_precision_*`（Notebook **05**）使用 `early_stop_metric: avg_precision` + `threshold_profile`；项目 KPI F1 见 `exp_full_f1_*`（Notebook **04**）。
 
@@ -413,7 +413,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 ### 7.6 Optuna 超参搜索（`configs/hpo/hpo.yaml`）
 
 - 入口：`bash scripts/optuna.sh [实验yaml] [hpo.yaml]`，默认 `exp_optuna_smoke.yaml`。  
-- **前置**：目标实验已完成 preprocess（存在 `data/splits/`）。  
+- **前置**：目标实验已完成 preprocess（存在该实验 YAML 的 `splits_dir`；默认全量为 `data/splits/`）。  
 - 每个 trial 写入 `config_snapshot.json` 后，通过 **subprocess + `torchrun`（若 DDP 启用）** 调用 `run_train`，与 `train.sh` 共用 GPU 启动逻辑；study 汇总见 `runs/optuna/<study_name>/best_trial.json`。  
 - 搜索空间：`backbone_channels`（3～4 stage）、`blocks_per_stage`、`use_residual`、`conv_kernel_size`、`head_hidden`、`dropout`、`lr` 等（见 `configs/hpo/hpo.yaml`；不含 `tabular_fuse_dim`，默认 spatial 下无效）。
 
@@ -667,12 +667,12 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 逐步命令与脚本说明见 **[`user_guide.md` §6](./user_guide.md)**。以下为配置层面的核对项（假设 `data/raw/` 已放置 mcelog / tickets / inventory）：
 
-1. **实验入口**：`configs/experiments/exp_full_recall_ddp.yaml`（或自定义 `run_name` 的等价 yaml）。  
+1. **实验入口**：`configs/experiments/exp_full_f1_ddp.yaml`（项目 KPI）或 `exp_full_recall_ddp.yaml`（工程向）；sid 变体见 `*_sid.yaml`。  
 2. **全量索引**：已执行 `bash scripts/build_index.sh full`；`index_features_path` 指向 `data/raw/features_index_h300s_step300s_full.csv`（非 stub）。  
 3. **截断开关**：`max_index_rows` 与 `mcelog_max_rows` 为 `null`。  
-4. **清理产物**：删除 `data/processed/*`、`data/splits/*` 及 preprocess marker。  
+4. **清理产物**：删除该实验的 `processed_dir`、`splits_dir` 内容及 preprocess marker。  
 5. **预处理 → 训练 → 推理 → 评估**：`preprocess.sh` → `train_ddp.sh` → `infer.sh` → `evaluate.sh`；infer 会自动比对 `config_snapshot.json`。  
-6. **指标口径**：部署 KPI 看 `metrics.json`（val 阈值）；`best_threshold_on_eval.json` 仅为测试集事后分析。
+6. **指标口径**：F1 实验看 `metrics.json` 顶层 F1；工程向看 `threshold_profile` 对应的 deployment KPI。
 
 ---
 
