@@ -1,0 +1,16 @@
+flowchart LR
+  subgraph IN["输入"]
+    X["x<br/>[N, C_in, H, W]"]
+  end
+
+  subgraph MAIN["主路径（_ConvBNReLU）"]
+    C["Conv2d<br/>kernel=3×3, padding=1<br/>C_in → C_out<br/>bias=False（配合 BN）"]
+    BN["BatchNorm2d(C_out)"]
+    R["ReLU"]
+  end
+
+  subgraph OUT["输出"]
+    Y["y<br/>[N, C_out, H, W]<br/>空间尺寸 H×W 不变"]
+  end
+
+  X --> C --> BN --> R --> Y

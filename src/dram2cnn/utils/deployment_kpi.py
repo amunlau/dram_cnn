@@ -52,7 +52,7 @@ def load_deployment_metrics(
     project_root_path: Path | None = None,
     strategy_label: str | None = None,
 ) -> dict[str, Any] | None:
-    """读取某 run 最近一次 infer 的部署口径 metrics。"""
+    """读取某 run 最近一次 infer 的部署阶段评价 metrics。"""
     root = project_root_path or project_root()
     run_root = root / "runs" / run_name
     infer_dir = read_pointer_dir(run_root, ".latest_infer_session", "latest_infer")

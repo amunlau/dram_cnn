@@ -1,0 +1,11 @@
+flowchart TB
+  TR["训练集 DataLoader<br/>class weight + 正样本过采样"]
+  VAL["验证集前向"]
+  TS["阈值网格搜索<br/>0.1~0.9 step=0.02<br/>objective=f1"]
+  ES["早停 best_f1<br/>patience=50"]
+  CKPT["保存 grid_cnn.pt<br/>+ best_threshold.json"]
+  INF["infer 使用验证集阈值<br/>写 predictions.csv"]
+  EVA["evaluate 部署 KPI"]
+
+  TR --> VAL --> TS --> ES
+  ES --> CKPT --> INF --> EVA

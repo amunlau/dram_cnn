@@ -32,7 +32,7 @@
 | `train` | `configs/train.yaml` | 优化器、batch、epoch、早停指标、类别不平衡（权重、Focal、过采样）、DDP、阈值搜索范围等。 |
 | `infer` | `configs/infer.yaml` | 推理 batch、模式（当前仓库要求 `full`）。 |
 
-**职责边界的设计原因**：`data` 与 `model` 必须一致，否则会在训练启动时报错或静默错位。常见错误是：改了 `grid_representation` 或 `inventory_as_grid_channels`，却忘记同步 `in_channels` / `tabular_dim` / `grid_height` / `grid_width`。因此 `validate_experiment`（训练前）会检查切分目录下的 `X_train.npy` 与 `model.yaml` 是否匹配；`validate_config`（加载配置时）会检查 `infer.mode`、`tabular_dim` 与 `TABULAR_DIM` 等硬约束。把 `model` 独立成段，是为了在文档与评审中明确：**模型段是「张量契约」**。
+**职责边界的设计原因**：`data` 与 `model` 必须一致，否则会在训练启动时报错或静默错位。常见错误是：改了 `grid_representation` 或 `inventory_as_grid_channels`，却忘记同步 `in_channels` / `tabular_dim` / `grid_height` / `grid_width`。因此 `validate_experiment`（训练前）会检查切分目录下的 `X_train.npy` 与 `model.yaml` 是否匹配；`validate_config`（加载配置时）会检查 `infer.mode`、`tabular_dim` 与 `TABULAR_DIM` 等硬约束。把 `model` 独立成段，是为了在文档与评审中明确：**模型段是「张量形状要求」**。
 
 ### 1.2 实验 YAML 与片段的关系
 
@@ -511,7 +511,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 - **实验 YAML**：`configs/experiments/*.yaml`。  
 - **合并**：`deep_update` 递归覆盖生成最终 `cfg`。  
 - **物化**：preprocess 写出 `npy`/`csv`/`json` 落盘。  
-- **契约**：`X_train.npy` 形状与 `model` 段一致的不变式。
+- **约定**：`X_train.npy` 形状与 `model` 段一致的不变式。
 
 ---
 
@@ -672,7 +672,7 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 3. **截断开关**：`max_index_rows` 与 `mcelog_max_rows` 为 `null`。  
 4. **清理产物**：删除该实验的 `processed_dir`、`splits_dir` 内容及 preprocess marker。  
 5. **预处理 → 训练 → 推理 → 评估**：`preprocess.sh` → `train_ddp.sh` → `infer.sh` → `evaluate.sh`；infer 会自动比对 `config_snapshot.json`。  
-6. **指标口径**：F1 实验看 `metrics.json` 顶层 F1；工程向看 `threshold_profile` 对应的 deployment KPI。
+6. **指标定义**：F1 实验看 `metrics.json` 顶层 F1；工程向看 `threshold_profile` 对应的 deployment KPI。
 
 ---
 
@@ -720,13 +720,13 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ---
 
-**结语**：配置的本质是把「我们对赛题与世界的不变量」编码成可执行约束。把**数据源**（索引路径）、**特征定义**（窗长、网格模式）、**模型契约**（C/H/W）、**优化与不平衡策略**（损失与采样）、**运行布局**（`run_name` 与版本目录）拆开，是为了让每一次实验差异都可被 **git diff** 阅读。希望本文能帮助你在不读完全部源码的前提下，仍能对「改这里会牵动哪里」有稳定直觉；当你需要下钻实现细节时，再以第十一章的模块映射为索引进入代码即可。
+**结语**：配置的本质是把「我们对赛题与世界的不变量」编码成可执行约束。把**数据源**（索引路径）、**特征定义**（窗长、网格模式）、**模型形状要求**（C/H/W）、**优化与不平衡策略**（损失与采样）、**运行布局**（`run_name` 与版本目录）拆开，是为了让每一次实验差异都可被 **git diff** 阅读。希望本文能帮助你在不读完全部源码的前提下，仍能对「改这里会牵动哪里」有稳定直觉；当你需要下钻实现细节时，再以第十一章的模块映射为索引进入代码即可。
 
 ---
 
 ## 第二十六章 扩展阅读：把「配置」放进软件工程流程
 
-在工业界竞赛或交付型项目中，配置管理往往还要对接：**数据版本（DVC/湖）、密钥与路径（环境变量）、算力队列（Slurm job yaml）**。本仓库刻意保持「纯 YAML + 脚本」的最小闭环，以便初学者不被工具链淹没。当你团队规模扩大时，建议在不变更合并语义的前提下，增加一层「环境 profile」：例如 `configs/profiles/cluster_a.yaml` 只放 `preprocess_parallel_frac` 与绝对路径，再在实验 yaml 最底部引用——注意当前 `load_experiment_config` **未**内置 profile 机制，任何此类扩展需同步修改加载器与文档，避免静默忽略文件。
+在工业界竞赛或交付型项目中，配置管理往往还要对接：**数据版本（DVC/湖）、密钥与路径（环境变量）、算力队列（Slurm job yaml）**。本仓库刻意保持「纯 YAML + 脚本」的最小流程，以便初学者不被工具链淹没。当你团队规模扩大时，建议在不变更合并语义的前提下，增加一层「环境 profile」：例如 `configs/profiles/cluster_a.yaml` 只放 `preprocess_parallel_frac` 与绝对路径，再在实验 yaml 最底部引用——注意当前 `load_experiment_config` **未**内置 profile 机制，任何此类扩展需同步修改加载器与文档，避免静默忽略文件。
 
 ---
 
@@ -785,6 +785,6 @@ manifest 记录 `ram_budget_gib`、`preprocess_estimated_peak_gib`、`preprocess
 
 ---
 
-## 第三十一章 小结：把配置当作「接口契约」而非「注释堆砌」
+## 第三十一章 小结：把配置当作「接口约定」而非「注释堆砌」
 
-你可以把五段片段看成五组**接口**：`data` 段定义上游数据契约，`model` 段定义张量契约，`train` 段定义优化与采样契约，`infer` 段定义服务化推理契约，`base` 段定义产物与设备契约。实验 yaml 则是「某次集成的版本号」。当团队开始用「接口契约」的语言讨论改动时，Review 会自然聚焦在：是否破坏契约、是否需要迁移数据、是否需要同步文档——而不是纠结在「这个键名好不好听」的表层问题。至此，本手册从动机、机制、字段、流程、反模式、培训、环境七个维度完成了对项目配置体系的展开；若你仍觉得某一段落抽象，请以具体一次 PR 的 `git diff` 为材料，对照第五章逐行标注「这一行改动会影响预处理还是仅影响训练」，反复几次后即可内化为直觉。
+你可以把五段片段看成五组**接口**：`data` 段定义上游数据约定，`model` 段定义张量形状要求，`train` 段定义优化与采样约定，`infer` 段定义服务化推理约定，`base` 段定义产物与设备约定。实验 yaml 则是「某次集成的版本号」。当团队开始用「接口约定」的语言讨论改动时，Review 会自然聚焦在：是否破坏约定、是否需要迁移数据、是否需要同步文档——而不是纠结在「这个键名好不好听」的表层问题。至此，本手册从动机、机制、字段、流程、反模式、培训、环境七个维度完成了对项目配置体系的展开；若你仍觉得某一段落抽象，请以具体一次 PR 的 `git diff` 为材料，对照第五章逐行标注「这一行改动会影响预处理还是仅影响训练」，反复几次后即可内化为直觉。

@@ -1,0 +1,24 @@
+flowchart TB
+  subgraph EVENT["单条 mcelog 事件"]
+    RC["row / col 逻辑地址"]
+    BK["bankid 0–15"]
+    ET["error_type ∈ {1,2}"]
+  end
+
+  subgraph BIN["空间分箱"]
+    RB["row_bin = row // 1024"]
+    CB["col_bin = col // 32"]
+    HW["网格 H×W = 128×32"]
+  end
+
+  subgraph CH["通道构建"]
+    C16["16 个 bank 通道<br/>bin 内 log1p 计数"]
+    C15["15 个 inventory 通道<br/>one-hot 平铺到 H×W"]
+    OUT["X: [31, 128, 32]"]
+  end
+
+  RC --> RB & CB --> HW
+  BK --> C16
+  ET --> C16
+  C16 --> OUT
+  C15 --> OUT

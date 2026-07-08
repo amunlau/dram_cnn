@@ -1,0 +1,26 @@
+flowchart TB
+  FT["工单失败时刻 ft"]
+
+  subgraph POS["正样本区（闭区间）"]
+    P1["ft − H"]
+    P2["ft"]
+    P1 -->|"步长 Δp（密集）"| P2
+  end
+
+  subgraph HARD["近故障困难负样本区（半开）"]
+    H1["ft − T_pre"]
+    H2["ft − H"]
+    H1 -->|"步长 Δn"| H2
+  end
+
+  subgraph GLOBAL["全局负样本区"]
+    G1["安全时间中段"]
+    G2["步长 Δn × k 或随机"]
+  end
+
+  FT --- POS
+  FT --- HARD
+
+  POS -->|"标签 y=1"| OUT[索引表]
+  HARD -->|"标签 y=0，前兆语义"| OUT
+  GLOBAL -->|"标签 y=0，单服务器上限"| OUT

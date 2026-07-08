@@ -1,4 +1,4 @@
-# 全量 + 项目 KPI：验证集 F1 最大化（time 切分；早停与阈值搜索均对齐 F1）
+# 全量 + 项目 KPI：验证集 F1 最大化（time 切分；早停与阈值搜索均以 F1 为目标）
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml

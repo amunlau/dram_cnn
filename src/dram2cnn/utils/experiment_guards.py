@@ -159,7 +159,7 @@ def assert_checkpoint_matches_experiment(
 ) -> None:
     """infer 前比对训练目录 ``config_snapshot.json`` 与当前实验 ``model`` 段是否一致。
 
-    缺 snapshot 时仅 WARNING（兼容旧 run）；存在 snapshot 且 model 键不一致则 fail-fast。
+    缺 snapshot 时仅 WARNING（兼容旧 run）；存在 snapshot 且 model 键不一致则 前置校验。
     """
     base = root or repo_root()
     ckpt_dir = ckpt_dir if ckpt_dir.is_absolute() else (base / ckpt_dir).resolve()

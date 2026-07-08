@@ -1,0 +1,38 @@
+flowchart TB
+  subgraph RAW["原始数据层"]
+    M["mcelog.csv<br/>机器可纠正错误事件"]
+    T["trouble_tickets.csv<br/>故障工单"]
+    V["inventory.csv<br/>硬件台账"]
+  end
+
+  subgraph IDX["索引构建"]
+    B["run_build_index<br/>scripts/build_index.sh"]
+    I["index_features_path<br/>(sid, predict_time)"]
+  end
+
+  subgraph PRE["预处理与切分"]
+    MAT["materialize_dataset<br/>空间热图 X.npy / y.npy"]
+    SPL["splitter<br/>time_stratified / sid"]
+    NORM["robust 标准化<br/>按训练集统计量"]
+  end
+
+  subgraph TRN["训练与推理"]
+    CNN["GridCNN-Deep<br/>grid_cnn.py"]
+    TH["验证集阈值搜索<br/>objective=f1"]
+    INF["run_infer<br/>predictions.csv"]
+  end
+
+  subgraph EVA["评估与验收"]
+    MET["run_evaluate<br/>metrics.json"]
+    KPI["部署 KPI<br/>F1 ≥ 0.6 目标"]
+  end
+
+  M --> B
+  T --> B
+  B --> I
+  I --> MAT
+  M --> MAT
+  T --> MAT
+  V --> MAT
+  MAT --> SPL --> NORM
+  NORM --> CNN --> TH --> INF --> MET --> KPI

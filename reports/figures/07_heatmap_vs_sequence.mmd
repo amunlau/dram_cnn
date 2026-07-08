@@ -1,0 +1,17 @@
+flowchart LR
+  subgraph SEQ["序列模型路径（本仓库未采用）"]
+    E1["事件流 e1,e2,..."]
+    RNN["RNN/LSTM/Transformer"]
+    OUT1["标量/向量分类"]
+  end
+
+  subgraph HEAT["空间热图 + CNN（本仓库采用）"]
+    E2["窗口内 CE 事件"]
+    BIN["row/col 分箱 + bank 通道"]
+    IMG["X: [31,128,32]"]
+    CNN["GridCNN-Deep"]
+    OUT2["二分类 logits"]
+  end
+
+  E1 --> RNN --> OUT1
+  E2 --> BIN --> IMG --> CNN --> OUT2

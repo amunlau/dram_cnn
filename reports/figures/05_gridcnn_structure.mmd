@@ -1,0 +1,12 @@
+flowchart TB
+  IN["输入 X<br/>[N, 31, 128, 32]"]
+  STEM["Stem Conv<br/>stem_channels=64"]
+  S1["Stage1: 64→64<br/>2×Conv/Res + MaxPool"]
+  S2["Stage2: 64→128<br/>2×Conv/Res + MaxPool"]
+  S3["Stage3: 128→256<br/>2×Conv/Res + MaxPool"]
+  S4["Stage4: 256→256<br/>2×Conv/Res + MaxPool"]
+  GAP["AdaptiveAvgPool2d(1,1)"]
+  MLP["Linear + Dropout<br/>head_hidden=256"]
+  OUT["输出 logits<br/>[N, 2]"]
+
+  IN --> STEM --> S1 --> S2 --> S3 --> S4 --> GAP --> MLP --> OUT

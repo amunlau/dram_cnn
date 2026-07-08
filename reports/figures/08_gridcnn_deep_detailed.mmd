@@ -1,0 +1,65 @@
+flowchart TB
+  subgraph INPUT["输入（preprocess 产物，robust 归一化后）"]
+    IN["X ∈ ℝ<sup>N×31×128×32</sup><br/>16 个 bank 通道（log1p 计数）<br/>15 个 inventory 通道（one-hot 广播）"]
+  end
+
+  subgraph STEM["首层卷积 Stem"]
+    S1["Conv2d 3×3, pad=1<br/>31 → 64 通道"]
+    S2["BatchNorm2d(64) + ReLU"]
+    SOUT["输出 [N, 64, 128, 32]"]
+    S1 --> S2 --> SOUT
+  end
+
+  subgraph BACKBONE["self.stages = nn.Sequential(Stage1…Stage4)"]
+    subgraph ST1["_Stage #1 · self.net = Sequential"]
+      ST1B1["[0] 残差块 · 64→64"]
+      ST1B2["[1] 残差块 · Dropout2d p=0.25"]
+      ST1P["[2] MaxPool2d(2) · 128×32→64×16"]
+      ST1OUT["[N, 64, 64, 16]"]
+      ST1B1 --> ST1B2 --> ST1P --> ST1OUT
+    end
+
+    subgraph ST2["_Stage #2 · self.net = Sequential"]
+      ST2A["[0] ConvBNReLU · 64→128"]
+      ST2B1["[1] 残差块 · 128→128"]
+      ST2B2["[2] 残差块 · Dropout2d"]
+      ST2P["[3] MaxPool2d(2) · 64×16→32×8"]
+      ST2OUT["[N, 128, 32, 8]"]
+      ST2A --> ST2B1 --> ST2B2 --> ST2P --> ST2OUT
+    end
+
+    subgraph ST3["_Stage #3 · self.net = Sequential"]
+      ST3A["[0] ConvBNReLU · 128→256"]
+      ST3B1["[1] 残差块 · 256→256"]
+      ST3B2["[2] 残差块 · Dropout2d"]
+      ST3P["[3] MaxPool2d(2) · 32×8→16×4"]
+      ST3OUT["[N, 256, 16, 4]"]
+      ST3A --> ST3B1 --> ST3B2 --> ST3P --> ST3OUT
+    end
+
+    subgraph ST4["_Stage #4 · self.net = Sequential"]
+      ST4B1["[0] 残差块 · 256→256"]
+      ST4B2["[1] 残差块 · Dropout2d"]
+      ST4P["[2] MaxPool2d(2) · 16×4→8×2"]
+      ST4OUT["[N, 256, 8, 2]"]
+      ST4B1 --> ST4B2 --> ST4P --> ST4OUT
+    end
+
+    ST1OUT --> ST2A
+    ST2OUT --> ST3A
+    ST3OUT --> ST4B1
+  end
+
+  subgraph HEAD["全局汇聚与分类头"]
+    GAP["AdaptiveAvgPool2d(1×1)<br/>[N, 256, 8, 2] → [N, 256, 1, 1]"]
+    FLAT["Flatten → [N, 256]"]
+    L1["Linear 256 → 256"]
+    R1["ReLU + Dropout p=0.25"]
+    L2["Linear 256 → 2"]
+    LOGITS["logits [N, 2]（未 softmax）"]
+    GAP --> FLAT --> L1 --> R1 --> L2 --> LOGITS
+  end
+
+  IN --> S1
+  SOUT --> ST1B1
+  ST4OUT --> GAP

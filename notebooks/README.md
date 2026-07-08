@@ -75,7 +75,7 @@ flowchart TD
 
 1. **`01_eda.ipynb`** — 确认 raw 数据
 2. **`04_run_pipelines.ipynb`** — 冒烟 → **F1 全量**
-3. **`05_full_recall_vs_precision.ipynb`** — **召回/精度**全量（可与 04 独立；preprocess 口径不同需清空 processed）
+3. **`05_full_recall_vs_precision.ipynb`** — **召回/精度**全量（可与 04 独立；预处理配置不同需清空 processed）
 4. **`03_error_analysis.ipynb`** — 训练完成后分析（按对应 `exp_full_*` YAML 指定 predictions）
 
 ---

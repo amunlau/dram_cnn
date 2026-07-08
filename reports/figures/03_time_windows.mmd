@@ -1,0 +1,18 @@
+flowchart LR
+  subgraph AXIS["相对时间轴（秒）"]
+    direction LR
+    W_START["predict_ts − W"]
+    P["predict_ts<br/>锚点"]
+    H_END["predict_ts + H"]
+  end
+
+  FEAT["特征窗（半开）<br/>[predict_ts−W, predict_ts)<br/>仅使用锚点之前 mcelog"]
+  LABEL["标签窗（闭）<br/>[predict_ts, predict_ts+H]<br/>对齐工单 failed_time"]
+
+  W_START --> FEAT
+  P --> FEAT
+  P --> LABEL
+  H_END --> LABEL
+
+  FEAT -.->|"默认 W=300s"| P
+  LABEL -.->|"默认 H=300s"| H_END

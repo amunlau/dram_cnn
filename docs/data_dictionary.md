@@ -29,7 +29,7 @@
 - **`tabular_{train,val,test}.npy`**：当 **`processed/`** 包含 **`tabular.npy`** 时存在；否则无此文件（与 **`model.tabular_dim=0`** 配套）
 - **`normalization_stats.json`**：`method`（`robust`|`zscore`）、`center_shape`/`scale_shape`（per-(C,H,W)）、可选 `clip`；tabular 分支同结构
 
-## 模型输入契约（`configs/model.yaml` → GridCNN-Deep）
+## 模型输入规范（`configs/model.yaml` → GridCNN-Deep）
 
 - **`X_*`** 形状须与 **`in_channels` × `grid_height` × `grid_width`** 一致（spatial 默认 **31×128×32**）
 - **`tabular_dim=0`** 时训练/推理仅使用 **`X`**；**`tabular_dim=15`** 时需同时提供 **`tabular_*`**

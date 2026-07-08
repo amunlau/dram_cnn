@@ -99,7 +99,7 @@ Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符�
 ## `bash scripts/clean.sh` 后全量实验 YAML 能否加载？
 
 - **可以**：`load_experiment_config` 对 `data/raw/features_index_*_full.csv` **允许暂缺**（clean 后正常）。
-- **不能 preprocess**：`check_preprocess_raw_inputs` 会在缺索引时 fail-fast，并提示 **`bash scripts/build_index.sh full`**。
+- **不能 preprocess**：`check_preprocess_raw_inputs` 会在缺索引时 前置校验，并提示 **`bash scripts/build_index.sh full`**。
 - **冒烟不受影响**：`data/index_stubs/features_5m_index_demo.csv` 仍须存在（`build_index.sh smoke` 可重建）。
 
 ## 全量实验与演示索引

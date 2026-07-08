@@ -1,0 +1,39 @@
+flowchart TB
+  subgraph CFG["配置层 configs/"]
+    D["data.yaml"]
+    M["model.yaml"]
+    TR["train.yaml"]
+    EX["experiments/*.yaml"]
+  end
+
+  subgraph DATA["数据层 dram2cnn.data"]
+    IB["index_builder"]
+    TB["tianchi_build"]
+    SP["splitter"]
+    IE["inventory_encode"]
+  end
+
+  subgraph MODEL["模型层 dram2cnn.models"]
+    GC["GridCNN / grid_cnn.py"]
+    FAC["factory.py"]
+    LS["losses.py"]
+  end
+
+  subgraph ENG["引擎层 dram2cnn.engine"]
+    TRN["trainer.py"]
+    PRD["predictor.py"]
+    EVL["evaluator.py"]
+    IMB["imbalance.py"]
+  end
+
+  subgraph RUN["运行层"]
+    SH["scripts/*.sh"]
+    PL["pipelines/*.py"]
+    NB["notebooks/04,05"]
+  end
+
+  EX --> D & M & TR
+  SH --> PL
+  PL --> DATA --> MODEL --> ENG
+  NB --> SH
+  CFG --> PL

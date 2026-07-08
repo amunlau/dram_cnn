@@ -1,0 +1,48 @@
+flowchart TB
+  subgraph GRIDCNN["GridCNN · self.stages = nn.Sequential(Stage1…Stage4)"]
+    direction TB
+
+    subgraph S1["_Stage #1 · self.net = Sequential"]
+      S1IN["[N,64,128,32]"]
+      S1L0["[0] 残差块 #1"]
+      S1L1["[1] 残差块 #2 · Dropout2d"]
+      S1L2["[2] MaxPool2d(2)"]
+      S1OUT["[N,64,64,16]"]
+      S1IN --> S1L0 --> S1L1 --> S1L2 --> S1OUT
+    end
+
+    subgraph S2["_Stage #2 · self.net = Sequential"]
+      S2IN["[N,64,64,16]"]
+      S2L0["[0] ConvBNReLU 64→128"]
+      S2L1["[1] 残差块 #1"]
+      S2L2["[2] 残差块 #2 · Dropout2d"]
+      S2L3["[3] MaxPool2d(2)"]
+      S2OUT["[N,128,32,8]"]
+      S2IN --> S2L0 --> S2L1 --> S2L2 --> S2L3 --> S2OUT
+    end
+
+    subgraph S3["_Stage #3 · self.net = Sequential"]
+      S3IN["[N,128,32,8]"]
+      S3L0["[0] ConvBNReLU 128→256"]
+      S3L1["[1] 残差块 #1"]
+      S3L2["[2] 残差块 #2 · Dropout2d"]
+      S3L3["[3] MaxPool2d(2)"]
+      S3OUT["[N,256,16,4]"]
+      S3IN --> S3L0 --> S3L1 --> S3L2 --> S3L3 --> S3OUT
+    end
+
+    subgraph S4["_Stage #4 · self.net = Sequential"]
+      S4IN["[N,256,16,4]"]
+      S4L0["[0] 残差块 #1"]
+      S4L1["[1] 残差块 #2 · Dropout2d"]
+      S4L2["[2] MaxPool2d(2)"]
+      S4OUT["[N,256,8,2]"]
+      S4IN --> S4L0 --> S4L1 --> S4L2 --> S4OUT
+    end
+
+    S1OUT --> S2IN
+    S2OUT --> S3IN
+    S3OUT --> S4IN
+  end
+
+  NOTE["forward: h = self.stem(x); h = self.stages(h)<br/>每个 Stage 内部: return self.net(x)"]

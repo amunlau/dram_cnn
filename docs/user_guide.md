@@ -228,7 +228,7 @@ bash scripts/inspect_data.sh
 
 ### 6.0 三种全量策略（Notebook 对照）
 
-| 目标 | Notebook | time YAML | sid YAML | preprocess 口径 |
+| 目标 | Notebook | time YAML | sid YAML | 预处理配置 |
 |------|----------|-----------|----------|-----------------|
 | **F1 最大化**（项目 KPI） | `04_run_pipelines.ipynb` | `exp_full_f1_ddp.yaml` | `exp_full_f1_sid.yaml` | `drop_empty_positive_windows: false` |
 | **召回率优先** | `05_full_recall_vs_precision.ipynb` | `exp_full_recall_ddp.yaml` | `exp_full_recall_sid.yaml` | `drop_empty_positive_windows: true` |
@@ -256,7 +256,7 @@ bash scripts/evaluate.sh configs/experiments/exp_full_f1_ddp.yaml
 
 默认 `time_stratified` 允许同一 sid 跨 train/test。sid 实验使用 **`split_strategy: sid`**（70/15/15 + sid 级正例分层），产物 **`data/splits_sid/`**。
 
-在已完成**同口径**全量 preprocess 后，可只重切分：
+在已完成**相同预处理配置**全量 preprocess 后，可只重切分：
 
 ```bash
 # F1 sid 示例（04）
@@ -266,7 +266,7 @@ bash scripts/infer.sh configs/experiments/exp_full_f1_sid.yaml
 bash scripts/evaluate.sh configs/experiments/exp_full_f1_sid.yaml
 ```
 
-**指标口径**：`metrics.json` 顶层 = **部署 KPI**（验证集阈值）；`oracle_on_test` 仅作分析。
+**指标定义**：`metrics.json` 顶层 = **部署 KPI**（验证集阈值）；`oracle_on_test` 仅作分析。
 
 ### 6.2 工程向配置（低漏报 / 精度优先 / 可调阈值）
 
@@ -497,7 +497,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 
 ### 12.4 全量 F1 sid（Notebook 04）
 
-需 **§12.3 preprocess 已完成**（同口径 `drop_empty_positive_windows: false`）：
+需 **§12.3 preprocess 已完成**（相同预处理配置 `drop_empty_positive_windows: false`）：
 
 | 步骤 | 操作 |
 |------|------|
@@ -526,7 +526,7 @@ Notebook 与 `scripts/*.sh` **共用实验 YAML**；**marker 步骤、三套流�
 ```
 01_eda → 04 冒烟 → 02 / 03 分析
                 ↓
-         04 全量 F1（或 05 工程向，二选一 preprocess 口径）
+         04 全量 F1（或 05 工程向，二选一 预处理配置）
                 ↓
          04 F1 sid 或 05 召回/精度 sid
 ```
