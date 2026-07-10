@@ -43,4 +43,4 @@ python3 scripts/build_index.py --mode "${MODE}" \
   --label-horizon-seconds 3600 --sample-interval-seconds 1800 --window-seconds 3600 \
   --out "${OUT_DIR}/features_index_h3600s_step1800s_${SUFFIX}.csv"
 
-echo "Done (${MODE}). 请在 exp_horizon_*.yaml 或 data.yaml 中设置 index_features_path 后重跑 preprocess。"
+echo "Done (${MODE}). 请在 exp_horizon_*.yaml 或 data.yaml 中设置 index_features_path 后重新执行预处理。"

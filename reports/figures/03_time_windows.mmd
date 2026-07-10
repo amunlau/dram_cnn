@@ -7,7 +7,7 @@ flowchart LR
   end
 
   FEAT["特征窗（半开）<br/>[predict_ts−W, predict_ts)<br/>仅使用锚点之前 mcelog"]
-  LABEL["标签窗（闭）<br/>[predict_ts, predict_ts+H]<br/>对齐工单 failed_time"]
+  LABEL["标签窗（闭）<br/>[predict_ts, predict_ts+H]<br/>关联工单 failed_time"]
 
   W_START --> FEAT
   P --> FEAT

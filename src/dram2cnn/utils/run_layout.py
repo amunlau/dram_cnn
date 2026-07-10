@@ -38,7 +38,7 @@ def _try_symlink(run_root: Path, link_name: str, target_dirname: str) -> None:
 
 
 def write_pointer(run_root: Path, pointer_filename: str, session_dirname: str) -> None:
-    """写入单行相对目录名，供跨平台解析「最新一次」产物目录。"""
+    """写入单行相对目录名，供跨平台解析「最新一次」输出目录。"""
     run_root.mkdir(parents=True, exist_ok=True)
     (run_root / pointer_filename).write_text(session_dirname.strip() + "\n", encoding="utf-8")
 
@@ -173,7 +173,7 @@ def resolve_checkpoint_dir(project_root: Path, base: dict) -> Path:
 
 
 def resolve_infer_output_dir(project_root: Path, base: dict) -> Path:
-    """推理预测 CSV 等产物目录；versioned_runs 为真时默认新建 infer_<时间戳>/。"""
+    """推理预测 CSV 等输出目录；versioned_runs 为真时默认新建 infer_<时间戳>/。"""
     run_name = str(base.get("run_name", "exp_tianchi_baseline"))
     run_root = _run_root(project_root, run_name)
     run_root.mkdir(parents=True, exist_ok=True)

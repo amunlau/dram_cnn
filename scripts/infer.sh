@@ -3,7 +3,7 @@
 # dram2cnn — 测试集推理（infer）
 #
 # 【做什么】
-#   加载训练得到的权重（最近 run 或配置指定的 checkpoint），对 data/splits/X_test.npy 前向，
+#   加载训练得到的权重（最近 run 或配置指定的 checkpoint），对实验 YAML 的 splits_dir/X_test.npy 前向，
 #   写出 predictions.csv，并更新本次推理会话标记（如 .latest_infer_session，见代码）。
 #   启动策略与 train.sh 相同：默认 DDP 使用全部可见 GPU，并按 80% 显存上限自动探测 batch_size。
 #

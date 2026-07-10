@@ -4,7 +4,7 @@
 #
 # 【做什么】
 #   调用 run_validate：检查配置项、张量形状是否与模型一致等。
-#   尚未跑 preprocess、没有 splits 时，请附加 --no-require-splits，只校验配置与原始路径。
+#   尚未执行预处理、没有 splits 时，请附加 --no-require-splits，只校验配置与原始路径。
 #
 # 【怎么用】
 #   bash scripts/validate.sh

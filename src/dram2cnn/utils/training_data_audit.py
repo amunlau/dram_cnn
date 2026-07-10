@@ -70,7 +70,7 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             " 冒烟请用 exp_baseline；全量请 `bash scripts/build_index.sh full` 并确认 "
             "全量实验 yaml（如 exp_full_f1_ddp / exp_full_recall_ddp）的 index_features_path "
             "为 data/raw/features_index_*_full.csv，"
-            " 清空 data/processed 与 data/splits 后 **重跑 preprocess**。"
+            " 清空当前实验的 processed_dir / splits_dir 后 **重新执行预处理**。"
         )
 
     if n_va < 32:
@@ -87,27 +87,3 @@ def log_dataset_health_for_train(cfg: dict[str, Any], logger: Any, project_root:
             " 但泛化仍受限于索引行数与特征信息量。",
             n_tr,
         )
-
-    if man_p.is_file():
-        try:
-            man2 = json.loads(man_p.read_text(encoding="utf-8"))
-            n_s = int(man2.get("n_samples") or 0)
-            n_em = int(man2.get("n_empty_grids") or 0)
-            n_drop = int(man2.get("n_empty_grids_dropped") or 0)
-            denom = max(n_s + n_drop, 1)
-            if n_em / denom >= 0.5:
-                truncated = man2.get("mcelog_max_rows") is not None
-                tail = (
-                    "冒烟 mcelog 截断下常见；全量请取消 mcelog_max_rows。"
-                    if truncated
-                    else "全量模式下空窗比例仍偏高，请核对 sid 对齐、window_seconds 与 mcelog 时间轴。"
-                )
-                logger.warning(
-                    "preprocess_manifest: n_empty_grids=%d，已丢弃负样本空窗 %d（保留正样本空窗 %d）；%s",
-                    n_em,
-                    n_drop,
-                    int(man2.get("n_empty_grids_kept_positive") or 0),
-                    tail,
-                )
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """测试集推理命令行入口。
 
-从 `data/splits/` 读取 `X_test.npy`（及可选 `tabular_test.npy`），加载训练产出的
+从实验 YAML 的 `splits_dir` 读取 `X_test.npy`（及可选 `tabular_test.npy`），加载训练产出的
 `grid_cnn.pt`，写出 **`predictions.csv`**（含 `y_true`/`y_pred`/`y_prob` 等）。
 
 checkpoint 目录由 **`configs/base.yaml`**（`versioned_runs`、`checkpoint_run_id`、`.latest_train_session`）

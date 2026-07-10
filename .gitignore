@@ -112,3 +112,6 @@ Thumbs.db
 .idea/
 .vscode/
 .cursor/
+
+# Notebook 批量执行日志（本地调试）
+notebooks_run_logs/

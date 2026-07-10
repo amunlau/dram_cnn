@@ -1,4 +1,4 @@
-"""阈值搜索 objective 与工程向 min_recall。"""
+"""阈值搜索 objective 与工程实验 min_recall。"""
 from __future__ import annotations
 
 import numpy as np

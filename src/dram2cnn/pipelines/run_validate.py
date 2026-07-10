@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-"""实验预检命令行入口。
+"""实验预先检查命令行入口。
 
-默认 **强制检查** `data/splits/*.npy` 是否与 `model.yaml` 的 C/H/W（及 tabular）一致。
+默认 **强制检查** 实验 YAML 的 `splits_dir` 下 `*.npy` 是否与模型配置的 C/H/W（及 tabular）一致。
 尚未预处理时，请传 **`--no-require-splits`**，只做配置与原始路径校验。
 """
 
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-require-splits",
         action="store_true",
-        help="不检查 data/splits（仅当尚未 preprocess 时使用）",
+        help="不检查 data/splits（仅当尚未预处理时使用）",
     )
     args = parser.parse_args()
     try:

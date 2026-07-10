@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""训练/推理前预检：配置、`processed/`、`data/splits/` 张量形状与 manifest 一致性。
+"""训练/推理前预先检查：配置、`processed_dir`、`splits_dir` 张量形状与 manifest 一致性。
 
 `require_splits=False` 时跳过切分文件检查，便于「尚未 preprocess」环境下只做路径校验。
 """
@@ -67,7 +67,7 @@ def check_preprocess_manifest(
     data_cfg: dict[str, Any] | None = None,
     project_root_path: Path | None = None,
 ) -> None:
-    """若存在 `preprocess_manifest.json`，则与 model/data 配置及磁盘上 `X.npy` 对齐，避免漏跑 preprocess。"""
+    """若存在 `preprocess_manifest.json`，则与 model/data 配置及磁盘上 `X.npy` 一致，避免漏执行预处理。"""
     man_p = processed_dir / "preprocess_manifest.json"
     if not man_p.is_file():
         return
@@ -79,7 +79,7 @@ def check_preprocess_manifest(
         if g_c != m_c or g_h != m_h or g_w != m_w:
             raise ValueError(
                 f"{man_p.name} 中 grid_shape={gs} 与 model.yaml "
-                f"(in_channels,grid_height,grid_width)=({m_c},{m_h},{m_w}) 不一致；请重跑 preprocess 或修正配置。"
+                f"(in_channels,grid_height,grid_width)=({m_c},{m_h},{m_w}) 不一致；请重新执行预处理或修正配置。"
             )
         x_path = processed_dir / "X.npy"
         if x_path.is_file():
@@ -87,19 +87,19 @@ def check_preprocess_manifest(
                 x = np.load(x_path, mmap_mode="r")
             except ValueError as exc:
                 raise ValueError(
-                    f"{x_path.name} 文件损坏或不完整（可能在 preprocess 中断时写入），请重跑 preprocess。"
+                    f"{x_path.name} 文件损坏或不完整（可能在 preprocess 中断时写入），请重新执行预处理。"
                 ) from exc
             chw = tuple(int(x.shape[i]) for i in range(1, 4)) if x.ndim == 4 else ()
             if x.ndim == 4 and chw != (g_c, g_h, g_w):
                 raise ValueError(
-                    f"{x_path.name} 形状 CHW={chw} 与 manifest grid_shape={gs} 不一致；请重跑 preprocess。"
+                    f"{x_path.name} 形状 CHW={chw} 与 manifest grid_shape={gs} 不一致；请重新执行预处理。"
                 )
     td_m = man.get("tabular_dim")
     if td_m is not None:
         m_td = int(model.get("tabular_dim", 0))
         if int(td_m) != m_td:
             raise ValueError(
-                f"{man_p.name} 中 tabular_dim={td_m} 与 model.tabular_dim={m_td} 不一致；请重跑 preprocess 或修正配置。"
+                f"{man_p.name} 中 tabular_dim={td_m} 与 model.tabular_dim={m_td} 不一致；请重新执行预处理或修正配置。"
             )
 
     if data_cfg is not None:
@@ -112,12 +112,12 @@ def check_preprocess_manifest(
         if man_win is not None and cfg_win is not None and float(man_win) != cfg_win:
             raise ValueError(
                 f"{man_p.name} 中 window_seconds={man_win} 与当前配置 {cfg_win} 不一致；"
-                "切换 horizon/窗口后请清空 processed/splits 并重跑 preprocess。"
+                "切换 horizon/窗口后请清空 processed/splits 并重新执行预处理。"
             )
         if man_hor is not None and cfg_hor is not None and float(man_hor) != cfg_hor:
             raise ValueError(
                 f"{man_p.name} 中 label_horizon_seconds={man_hor} 与当前配置 {cfg_hor} 不一致；"
-                "切换 horizon 实验后请清空 processed/splits 并重跑 preprocess。"
+                "切换 horizon 实验后请清空 processed/splits 并重新执行预处理。"
             )
 
         man_idx = man.get("index_features_path")
@@ -128,7 +128,7 @@ def check_preprocess_manifest(
             if man_pth and cfg_pth and man_pth != cfg_pth:
                 raise ValueError(
                     f"{man_p.name} 中 index_features_path={man_idx} 与当前配置 {cfg_idx_raw} 不一致；"
-                    "改索引路径后请重跑 preprocess。"
+                    "改索引路径后请重新执行预处理。"
                 )
 
         def _norm_mcelog_cap(raw: Any) -> int | None:
@@ -143,7 +143,17 @@ def check_preprocess_manifest(
                 raise ValueError(
                     f"{man_p.name} 中 mcelog_max_rows={man.get('mcelog_max_rows')} "
                     f"与当前配置 {data_cfg.get('mcelog_max_rows')} 不一致；"
-                    "切换冒烟/全量截断后请清空 processed/splits 并重跑 preprocess。"
+                    "切换冒烟/全量截断后请清空 processed/splits 并重新执行预处理。"
+                )
+
+        if "drop_empty_positive_windows" in man and "drop_empty_positive_windows" in data_cfg:
+            man_pos = bool(man.get("drop_empty_positive_windows"))
+            cfg_pos = bool(data_cfg.get("drop_empty_positive_windows"))
+            if man_pos != cfg_pos:
+                raise ValueError(
+                    f"{man_p.name} 中 drop_empty_positive_windows={man_pos} "
+                    f"与当前配置 {cfg_pos} 不一致（F1 主实验为 false，工程实验为 true）；"
+                    "切换实验后请清空 processed/splits 并重新执行预处理。"
                 )
 
 
@@ -152,7 +162,7 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
 
     Args:
         cfg: 合并后的实验配置 dict。
-        require_splits: True 时检查 `data/splits/` 下 train/val/test 张量形状与 tabular 语义。
+        require_splits: True 时检查实验 `splits_dir` 下 train/val/test 张量形状与 tabular 语义。
 
     Returns:
         含 `expected_shape`、`checks.processed`、`checks.splits` 等字段的报告 dict。
@@ -202,12 +212,14 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
         man = json.loads(man_p.read_text(encoding="utf-8"))
         if cfg.get("data", {}).get("index_features_path") and not man.get("index_features_path"):
             report["warnings"].append(
-                "preprocess_manifest 缺少 index_features_path（旧产物）；建议重跑 preprocess 以便校验索引路径。"
+                "preprocess_manifest 缺少 index_features_path（旧输出）；建议重新执行预处理 以便校验索引路径。"
             )
         n_samples = int(man.get("n_samples") or 0)
         n_empty = int(man.get("n_empty_grids") or 0)
-        n_dropped = int(man.get("n_empty_grids_dropped") or 0)
-        n_before = int(man.get("n_samples_before_drop") or (n_samples + n_dropped))
+        n_dropped_neg = int(man.get("n_empty_grids_dropped") or 0)
+        n_dropped_pos = int(man.get("n_empty_positive_dropped") or 0)
+        n_kept_pos = int(man.get("n_empty_grids_kept_positive") or 0)
+        n_before = int(man.get("n_samples_before_drop") or (n_samples + n_dropped_neg + n_dropped_pos))
         if n_before > 0 and n_empty / n_before >= 0.5:
             mcelog_cap = man.get("mcelog_max_rows")
             cfg_cap = cfg.get("data", {}).get("mcelog_max_rows")
@@ -215,11 +227,11 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
             tail = (
                 "冒烟 mcelog 截断下常见，全量请取消 mcelog_max_rows。"
                 if truncated
-                else "全量模式下空窗比例仍偏高，请核对 sid 对齐、window_seconds 与 mcelog 时间轴。"
+                else "全量模式下空窗比例仍偏高，请核对 sid 匹配、window_seconds 与 mcelog 时间轴。"
             )
             report["warnings"].append(
-                f"n_empty_grids={n_empty}（已丢弃负样本空窗 {n_dropped}，保留正样本空窗 "
-                f"{int(man.get('n_empty_grids_kept_positive') or 0)}）；{tail}"
+                f"n_empty_grids={n_empty}（已丢弃负样本空窗 {n_dropped_neg}，"
+                f"正样本空窗丢弃 {n_dropped_pos} / 保留 {n_kept_pos}）；{tail}"
             )
 
     x_proc = processed_dir / "X.npy"
@@ -250,7 +262,7 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
                     raise ValueError(f"{tab_path.name} 形状 {t.shape} 与期望 [N={n},F={tab_dim_cfg}] 不符")
             elif tab_path.is_file():
                 raise ValueError(
-                    f"发现 {tab_path} 但 model.tabular_dim=0，请设置 tabular_dim 或删除 tabular 切分文件后重跑 preprocess"
+                    f"发现 {tab_path} 但 model.tabular_dim=0，请设置 tabular_dim 或删除 tabular 切分文件后重新执行预处理"
                 )
             meta_path = splits_dir / f"meta_{name}.csv"
             if meta_path.exists():
@@ -270,7 +282,7 @@ def validate_experiment(cfg: dict[str, Any], require_splits: bool = True) -> dic
         if proc_n is not None and proc_n > 0 and split_total != proc_n:
             raise ValueError(
                 f"splits 总行数 {split_total} 与 processed 样本数 {proc_n} 不一致；"
-                "可能 split 未完成或使用了陈旧 data/splits，请重跑 preprocess。"
+                "可能 split 未完成或使用了陈旧 data/splits，请重新执行预处理。"
             )
         norm_stats = splits_dir / "normalization_stats.json"
         report["checks"]["splits"] = {

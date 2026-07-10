@@ -16,9 +16,11 @@
 
 | 场景 | 典型 `processed_dir` | 典型 `splits_dir` |
 |------|----------------------|-------------------|
-| 冒烟 baseline | `data/processed_smoke/` | `data/splits_smoke/` |
-| 全量 F1 / 工程向 | `data/processed/` | `data/splits/` |
-| 全量 sid | `data/processed/`（共用） | `data/splits_sid/` 等 |
+| 冒烟基线实验 | `data/processed_smoke/` | `data/splits_smoke/` |
+| 冒烟 sid | `data/processed_smoke/`（共用） | `data/splits_sid_smoke/` |
+| 全量 F1 / 工程实验 | `data/processed/` | `data/splits/` |
+| 全量 sid | `data/processed/`（共用） | `data/splits_sid/` |
+| 平衡工程 sid | `data/processed/`（共用） | `data/splits_sid_balanced/` |
 | Horizon 30min 冒烟 | `data/processed_horizon_30m_smoke/` | `data/splits_horizon_30m_smoke/` |
 
 各目录内常见文件：
@@ -32,13 +34,13 @@
 
 | 命令 | 说明 |
 |------|------|
-| `bash scripts/build_index.sh smoke` | 推荐入口：写入 `features_5m_index_demo.csv`，~500 行 |
+| `bash scripts/build_index.sh smoke` | 推荐入口：写入 `features_5m_index_demo.csv`，索引约 500 行（预处理后约 294） |
 | `PYTHONPATH=src python3 scripts/build_index.py --mode smoke` | 同上；自定义 horizon 时用 `--out` 指定路径 |
 | `bash scripts/build_index.sh full` 或 `build_index.py --mode full` | 全量扫描，输出至 `data/raw/features_index_h{H}s_step{S}s_full.csv` |
 | `--label-horizon-seconds 1800` | 预测「未来 30 分钟是否故障」 |
 | `--sample-interval-seconds 600` | 每 10 分钟一个预测锚点 |
-| `--window-seconds 1800` | 特征窗长度（须与实验 `window_seconds` 一致；CLI 未指定时默认等于 horizon） |
+| `--window-seconds 1800` | 特征窗长度（须与实验 `window_seconds` 一致；命令行未指定时默认等于 horizon） |
 
-生成后在实验 yaml 的 `overrides.data.index_features_path` 中指向该 CSV 并 **重跑 preprocess**（全量示例：`exp_full_f1_ddp.yaml` 或 `exp_full_recall_ddp.yaml`）。
+生成后在实验 yaml 的 `overrides.data.index_features_path` 中指向该 CSV 并 **重新执行预处理**（全量示例：`exp_full_f1_ddp.yaml` 或 `exp_full_recall_ddp.yaml`）。
 
 字段与形状见 `docs/data_dictionary.md`、`docs/data_processing_guide.md`.

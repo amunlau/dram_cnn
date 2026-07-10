@@ -68,3 +68,21 @@ def test_preprocess_manifest_mcelog_cap_mismatch_raises(tmp_path: Path):
     data_cfg = {"mcelog_max_rows": None}
     with pytest.raises(ValueError, match="mcelog_max_rows"):
         check_preprocess_manifest(proc, model, (3, 8, 8), data_cfg=data_cfg, project_root_path=tmp_path)
+
+
+def test_preprocess_manifest_drop_empty_positive_mismatch_raises(tmp_path: Path):
+    proc = tmp_path / "processed"
+    proc.mkdir()
+    (proc / "preprocess_manifest.json").write_text(
+        json.dumps(
+            {
+                "grid_shape": [3, 8, 8],
+                "drop_empty_positive_windows": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    model = {"in_channels": 3, "grid_height": 8, "grid_width": 8, "tabular_dim": 0}
+    data_cfg = {"drop_empty_positive_windows": False}
+    with pytest.raises(ValueError, match="drop_empty_positive_windows"):
+        check_preprocess_manifest(proc, model, (3, 8, 8), data_cfg=data_cfg, project_root_path=tmp_path)

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# dram2cnn — 一键冒烟流水线（autotune）
+# dram2cnn — 端到端链路检查流水线（autotune）
 #
 # 【做什么】
 #   顺序执行 preprocess（含末尾 validate）→ train → infer → evaluate（实验列表见
 #   dram2cnn.pipelines.run_autotune 内 EXPS）。
-#   用于 CI 或本地快速验证「整条链路能跑通」。
+#   用于 CI 或本地快速验证「整条链路可完整执行」。
 #
 # 【怎么用】
 #   bash scripts/autotune.sh

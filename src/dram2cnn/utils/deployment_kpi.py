@@ -1,4 +1,4 @@
-"""部署 KPI 汇总：从 runs/ 读取 metrics.json，合并多策略对比表。"""
+"""部署阶段评价指标汇总：从 runs/ 读取 metrics.json，合并多策略对比表。"""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def collect_kpi_rows(
         if row:
             rows.append(row)
         else:
-            print(f"提示：尚无 {run_name} 的 metrics.json，请先跑 train/infer/evaluate")
+            print(f"提示：尚无 {run_name} 的 metrics.json，请先执行训练、推理与评估")
     return rows
 
 
@@ -108,7 +108,7 @@ def merge_all_strategies_kpi(
     tables_dir: Path | None = None,
     out_name: str = "full_all_strategies_deployment_kpi.csv",
 ) -> Path | None:
-    """合并 F1 与工程向 KPI 子表为一张总表。"""
+    """合并 F1 与工程实验评价指标子表为一张总表。"""
     root = project_root()
     td = tables_dir or (root / "outputs" / "tables")
     parts: list[pd.DataFrame] = []
@@ -130,7 +130,7 @@ def main() -> None:
     """CLI：合并 outputs/tables 下子表为 full_all_strategies_deployment_kpi.csv。"""
     out = merge_all_strategies_kpi()
     if out is None:
-        print("未找到可合并的 KPI 子表（需先跑 Notebook 04/05 或等价流水线）")
+        print("未找到可合并的评价指标子表（需先跑 Notebook 04/05 或等价流水线）")
         raise SystemExit(1)
     print(f"已写入 {out}")
 

@@ -4,13 +4,14 @@ flowchart TB
     L0["layers = []"]
     L1{"C_in ≠ C_out ?"}
     L1Y["layers.append(ConvBNReLU)<br/>C_in → C_out"]
-    L2["for i in range(n_blocks):<br/>layers.append(ResidualBlock 或 ConvBNReLU)<br/>末块 ResidualBlock 启用 Dropout2d"]
+    L2["for i in range(n_blocks):<br/>layers.append(ConvBNReLU)"]
+    L2D["若 dropout>0：layers.append(Dropout2d)"]
     L3["layers.append(MaxPool2d(2))"]
     L4["self.net = nn.Sequential(*layers)"]
     L0 --> L1
     L1 -->|是| L1Y --> L2
     L1 -->|否| L2
-    L2 --> L3 --> L4
+    L2 --> L2D --> L3 --> L4
   end
 
   subgraph FWD["前向（_Stage.forward）"]
@@ -23,10 +24,11 @@ flowchart TB
   subgraph SEQ["self.net 内部顺序（Sequential 逐层执行）"]
     direction TB
     S0["[0] 可选 ConvBNReLU<br/>仅 C_in≠C_out 时存在"]
-    S1["[1] 卷积块 #1<br/>ResidualBlock 或 ConvBNReLU"]
-    S2["[2] 卷积块 #2（末块）<br/>ResidualBlock + Dropout2d<br/>或 ConvBNReLU"]
-    S3["[3] MaxPool2d(2)"]
-    S0 --> S1 --> S2 --> S3
+    S1["[1] 卷积块 #1<br/>ConvBNReLU"]
+    S2["[2] 卷积块 #2<br/>ConvBNReLU"]
+    SD["[3] Dropout2d（可选）"]
+    S3["[4] MaxPool2d(2)"]
+    S0 --> S1 --> S2 --> SD --> S3
   end
 
   L4 -.-> NET

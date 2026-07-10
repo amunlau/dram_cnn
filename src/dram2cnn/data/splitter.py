@@ -49,7 +49,7 @@ def _fit_plane_normalizer(X: np.ndarray, method: NormMethod) -> tuple[np.ndarray
         std = X.std(axis=0) + 1e-6
         scale = np.where(iqr > 1e-6, iqr, np.where(mad > 1e-6, mad, std))
         note = (
-            "Per (C,H,W) median/IQR from X_train; IQR≈0 时回退 MAD，再回退 std，"
+            "Per (C,H,W) median/IQR from X_train; IQR≈0 时改用 MAD，再改用标准差，"
             "缓解稀疏 voxel 在 val/test 上爆炸。"
         )
     elif method == "zscore":
@@ -91,6 +91,8 @@ def _save_indexed_rows(
     chunk_rows: int = _SPLIT_SAVE_CHUNK_ROWS,
 ) -> None:
     """将 ``arr[idx]`` 写入 ``path``；4D 网格按行分块，避免一次性 materialize 整个 split。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     n_out = int(len(idx))
     if n_out == 0:
         np.save(path, arr[idx])
@@ -127,6 +129,8 @@ def _save_indexed_rows(
             del block
     finally:
         del out_mm
+    # 父目录可能被并发清理删掉；replace 前再确保存在
+    path.parent.mkdir(parents=True, exist_ok=True)
     os.replace(tmp, path)
 
 
@@ -180,7 +184,7 @@ def normalize_split_features_by_train(
             if prev.get("normalized") is True:
                 raise ValueError(
                     f"{stats_path} 表明 splits 已归一化；请勿二次 normalize。"
-                    "请清空 splits 并从 processed/ 重跑 preprocess。"
+                    "请清空 splits 并从 processed/ 重新执行预处理。"
                 )
         except json.JSONDecodeError:
             pass
@@ -275,11 +279,11 @@ def _save_split(
 
 
 def _load_processed_arrays(pdir: Path) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, np.ndarray | None]:
-    """加载 processed 产物；X 用 memmap 只读，避免 split 阶段再占一份整表 RSS。"""
+    """加载 processed 输出；X 用 memmap 只读，避免 split 阶段再占一份整表 RSS。"""
     for name in ("X.npy", "y.npy", "meta.csv"):
         p = pdir / name
         if not p.is_file():
-            raise FileNotFoundError(f"缺少预处理产物 {p}；请先运行 preprocess。")
+            raise FileNotFoundError(f"缺少预处理输出 {p}；请先运行 preprocess。")
     X = np.load(pdir / "X.npy", mmap_mode="r")
     y = np.load(pdir / "y.npy")
     meta = pd.read_csv(pdir / "meta.csv")

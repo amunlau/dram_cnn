@@ -15,11 +15,13 @@ from __future__ import annotations
 3. **窗口** `window_slice`：半开区间 `[predict_ts - window_seconds, predict_ts)`。
 4. **inventory**：见 `inventory_encode`；若拼入网格则通常不写单独 `tabular.npy`（`model.tabular_dim=0`）。
 
-产物：`X.npy`、`y.npy`、可选 `tabular.npy`、`meta.csv`、`preprocess_manifest.json`。"""
+输出：`X.npy`、`y.npy`、可选 `tabular.npy`、`meta.csv`、`preprocess_manifest.json`。"""
 
 import gc
+import hashlib
 import json
 import multiprocessing
+import shutil
 import sys
 import warnings
 from collections import defaultdict
@@ -52,7 +54,7 @@ from dram2cnn.utils.preprocess_parallelism import (
 
 
 def normalize_sid(s: object) -> str:
-    """统一 sid 字符串（去首尾空白），避免索引/mcelog/tickets 对齐失败。"""
+    """统一 sid 字符串（去首尾空白），避免索引/mcelog/tickets 关联失败。"""
     return str(s).strip()
 
 
@@ -353,6 +355,50 @@ def build_events_by_sid(
     return out, events_finalize_parallel
 
 
+def _should_spill_events_to_disk(n_samples: int, grid_shape: tuple[int, int, int]) -> bool:
+    """全量 mcelog events 常驻内存易与 X memmap 叠加 OOM；大样本时落盘按 sid 懒加载。"""
+    c, h, w = (int(grid_shape[0]), int(grid_shape[1]), int(grid_shape[2]))
+    x_gib = max(0, int(n_samples)) * c * h * w * 4 / (1024**3)
+    return int(n_samples) >= 10_000 or x_gib > 4.0
+
+
+def _spill_events_to_disk(
+    events: dict[str, dict[str, np.ndarray]],
+    tmp_dir: Path,
+) -> dict[str, Path]:
+    """将各 sid 的 events 写入 ``tmp_dir/*.npz``，返回 sid → 路径。"""
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {}
+    for sid, ev in events.items():
+        digest = hashlib.sha1(str(sid).encode("utf-8")).hexdigest()[:16]
+        p = tmp_dir / f"ev_{digest}.npz"
+        np.savez(p, **ev)
+        paths[str(sid)] = p
+    return paths
+
+
+def _load_spilled_sid_events(path: Path) -> dict[str, np.ndarray]:
+    with np.load(path) as z:
+        return {
+            "t": np.asarray(z["t"], dtype=np.float64),
+            "row": np.asarray(z["row"], dtype=np.int32),
+            "col": np.asarray(z["col"], dtype=np.int32),
+            "etype": np.asarray(z["etype"], dtype=np.int8),
+            "bank": np.asarray(z["bank"], dtype=np.int8),
+        }
+
+
+def _window_slice_one_sid(
+    ev: dict[str, np.ndarray] | None,
+    sid: str,
+    t_end: float,
+    window_sec: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    if ev is None:
+        return None
+    return window_slice({sid: ev}, sid, t_end, window_sec)
+
+
 def load_index_table(
     path: Path,
     max_rows: int | None,
@@ -360,7 +406,7 @@ def load_index_table(
 ) -> pd.DataFrame:
     """读索引 CSV，解析 ``predict_time`` 并写入 ``predict_ts``（**相对秒**，全局最早时刻 = 0）。
 
-    本仓库 ``build_index`` 产物以 1970-01-01 起算的 ISO 字符串存储，解析后即为相对秒。
+    本仓库 ``build_index`` 输出以 1970-01-01 起算的 ISO 字符串存储，解析后即为相对秒。
     遗留「公元 0001」等低年份索引须传入 ``time_epoch_offset``（与 preprocess 扫描的 ``t₀`` 一致）。
     """
     if not path.is_file():
@@ -411,7 +457,7 @@ def merge_ticket_labels(
     *,
     by_sid_fail: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """按工单规则打标：存在工单满足 predict_ts <= failed_ts <= predict_ts + label_horizon_seconds。
+    """按工单规则标注：存在工单满足 predict_ts <= failed_ts <= predict_ts + label_horizon_seconds。
 
     ``index_df.predict_ts`` 与工单 ``failed_ts`` 均为**相对秒**（须与 mcelog 事件时间同一 ``time_epoch_offset``）。
     传入 ``by_sid_fail`` 时可跳过重复读 tickets CSV（索引构建阶段复用）。
@@ -585,7 +631,7 @@ def materialize_dataset(
     processed_dir: Path,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """从 raw + 索引表物化全量池：写 processed/，不切 train/val/test（由 run_preprocess 调 splitter）。
+    """从 raw + 索引表生成全量特征池：写 processed/，不切 train/val/test（由 run_preprocess 调 splitter）。
 
     主干：扫 mcelog → events → 对每条索引行 window_slice → 填 X；y 由工单规则 merge_ticket_labels。
     """
@@ -742,13 +788,120 @@ def materialize_dataset(
         time_epoch_offset=time_epoch_offset,
     )
 
-    # 按索引行填 X：样本数 n = 索引表行数（与 mcelog 行数无关）
-    X = np.zeros((n, in_ch, grid_h, grid_w), dtype=np.float32)
     sids_arr = idx_df["sid"].astype(str).to_numpy()
     pts_arr = idx_df["predict_ts"].to_numpy(dtype=np.float64)
-    # 填网格并行：样本太少时进程开销不划算；非 Linux 关闭
+    drop_empty = bool(data_cfg.get("drop_empty_mcelog_windows", True))
+    drop_empty_pos = bool(data_cfg.get("drop_empty_positive_windows", False))
+    n_before_drop = int(n)
+
+    spill_dir = processed_dir / ".events_spill"
+    use_event_spill = _should_spill_events_to_disk(n, (in_ch, grid_h, grid_w))
+    spill_paths: dict[str, Path] | None = None
+    if use_event_spill:
+        if spill_dir.is_dir():
+            shutil.rmtree(spill_dir, ignore_errors=True)
+        print(
+            f"Spilling mcelog events to disk ({len(events)} sids) → {spill_dir.name}/ …",
+            flush=True,
+        )
+        spill_paths = _spill_events_to_disk(events, spill_dir)
+        del events
+        events = None
+        gc.collect()
+        print("  events 已落盘，后续按 sid 懒加载以降低内存峰值。", flush=True)
+
+    sid_to_rows: dict[str, list[int]] = defaultdict(list)
+    for i in range(n):
+        sid_to_rows[normalize_sid(sids_arr[i])].append(i)
+
+    # 扫描空窗（按 sid 加载 events，避免全量 events 与 X memmap 同时常驻）
+    empty_row_indices: list[int] = []
+    n_sids_scan = len(sid_to_rows)
+    print(f"Scanning empty mcelog windows over {n_sids_scan} sids …", flush=True)
+    for sid_i, (sid, inds) in enumerate(sid_to_rows.items(), start=1):
+        ev = (
+            _load_spilled_sid_events(spill_paths[sid])
+            if spill_paths is not None and sid in spill_paths
+            else (events.get(sid) if events is not None else None)
+        )
+        if ev is None:
+            empty_row_indices.extend(inds)
+            continue
+        for i in inds:
+            if _window_slice_one_sid(ev, sid, float(pts_arr[i]), win) is None:
+                empty_row_indices.append(i)
+        del ev
+        # 勿对每个 sid 调 gc.collect（3 万+ 次会卡死数十分钟）；每 2000 个 sid 回收一次即可
+        if spill_paths is not None and sid_i % 2000 == 0:
+            gc.collect()
+            print(f"  empty-window scan progress: {sid_i}/{n_sids_scan}", flush=True)
+    if spill_paths is not None:
+        gc.collect()
+    print(f"  empty-window scan done: {n_sids_scan} sids", flush=True)
+    n_empty_grids = len(empty_row_indices)
+
+    keep = np.ones(n, dtype=bool)
+    n_empty_kept_positive = 0
+    n_dropped_empty_positive = 0
+    if drop_empty and empty_row_indices:
+        for i in empty_row_indices:
+            if int(y[i]) == 0:
+                keep[i] = False
+            elif drop_empty_pos:
+                keep[i] = False
+                n_dropped_empty_positive += 1
+            else:
+                n_empty_kept_positive += 1
+    n_dropped_empty = int((~keep).sum())
+    # 负样本空窗丢弃数（不含正样本空窗；正样本见 n_empty_positive_dropped）
+    n_dropped_empty_negative = int(n_dropped_empty - n_dropped_empty_positive)
+    n_kept = int(keep.sum())
+    _grid_bytes = int(in_ch) * int(grid_h) * int(grid_w) * 4
+    _full_x_gib = n_before_drop * _grid_bytes / (1024**3)
+    # 仅在大体量 X 时紧凑分配，避免小数据集无法走并行填网格的回归测试失败
+    use_compact_x = n_dropped_empty > 0 and _full_x_gib > 8.0
+    # 填网格阶段：compact 直接按保留行数分配；否则先按全量 n 填，再二次压缩到 n_kept
+    n_out = n_kept if use_compact_x else n
+    out_row = np.arange(n, dtype=np.int32)
+    if use_compact_x:
+        out_row = np.full(n, -1, dtype=np.int32)
+        out_row[keep] = np.arange(n_kept, dtype=np.int32)
+
+    x_out_path = processed_dir / "X.npy"
+    x_build_path = processed_dir / "X.building.npy"
+    if use_compact_x:
+        if x_out_path.is_file():
+            x_out_path.unlink()
+        x_alloc_path = x_out_path
+        x_shape = (n_out, in_ch, grid_h, grid_w)
+    else:
+        if x_build_path.is_file():
+            x_build_path.unlink()
+        x_alloc_path = x_build_path
+        x_shape = (n, in_ch, grid_h, grid_w)
+
+    # 全量约 66k×31×128×32×4B ≈ 31GiB；用磁盘 memmap，drop 空窗时直接按 n_out 分配，免二次压缩。
+    X = np.lib.format.open_memmap(
+        str(x_alloc_path),
+        mode="w+",
+        dtype=np.float32,
+        shape=x_shape,
+    )
+    print(
+        f"X 使用磁盘 memmap 预分配: shape={x_shape} → {x_alloc_path.name}"
+        + ("（空窗丢弃，紧凑分配）" if use_compact_x else ""),
+        flush=True,
+    )
+
+    # 填网格并行：样本太少时进程开销不划算；紧凑写入时须单进程按 out_row 映射
     min_samples_mp = max(16, nw_cfg * 2)
-    use_mp = _preprocess_fork_parallel_available() and nw_cfg > 1 and n >= min_samples_mp
+    use_mp = (
+        _preprocess_fork_parallel_available()
+        and nw_cfg > 1
+        and n >= min_samples_mp
+        and not use_compact_x
+        and not use_event_spill
+    )
     if use_mp:
         try:
             multiprocessing.get_context("fork")
@@ -756,8 +909,6 @@ def materialize_dataset(
             use_mp = False
 
     grid_fill_parallel_done = False
-    n_empty_grids = 0
-    empty_row_indices: list[int] = []
     global _WORKER_CTX
     leg_in = int(model_cfg.get("in_channels", 3))
 
@@ -792,11 +943,8 @@ def materialize_dataset(
         try:
             ctx_mp = multiprocessing.get_context("fork")
             with ctx_mp.Pool(processes=len(batches)) as pool:
-                for inds, block, skip, skipped in pool.map(_fill_indices_batch, batches):
+                for inds, block, _skip, _skipped in pool.map(_fill_indices_batch, batches):
                     X[inds] = block
-                    n_empty_grids += int(skip)
-                    if skipped.size > 0:
-                        empty_row_indices.extend(int(x) for x in skipped)
         finally:
             _WORKER_CTX = None
         grid_fill_parallel_done = True
@@ -812,18 +960,30 @@ def materialize_dataset(
                     f"提示：样本数 n={n} 较小（<{min_samples_mp}），预处理网格填充保持单进程以降低进程开销。",
                     flush=True,
                 )
-        # 单进程：按 sid 分组再按 predict_ts 排序遍历，顺序与多进程分批填充语义一致，利于复现
-        sid_to_rows: dict[str, list[int]] = defaultdict(list)
-        for i in range(n):
-            sid_to_rows[normalize_sid(sids_arr[i])].append(i)
-        for _sid, inds in sid_to_rows.items():
+        # 单进程：按 sid 分组再按 predict_ts 排序遍历
+        _filled = 0
+        _report_every = max(5000, n_out // 20)
+        _sid_i = 0
+        print(f"Filling grids single-process (n={n}, write_rows={n_out}) …", flush=True)
+        for sid, inds in sid_to_rows.items():
+            _sid_i += 1
+            ev = (
+                _load_spilled_sid_events(spill_paths[sid])
+                if spill_paths is not None and sid in spill_paths
+                else (events.get(sid) if events is not None else None)
+            )
             for i in sorted(inds, key=lambda ii: float(pts_arr[ii])):
-                sid = normalize_sid(sids_arr[i])
+                if use_compact_x and not keep[i]:
+                    continue
+                j = int(out_row[i])
                 pts = float(pts_arr[i])
-                sl = window_slice(events, sid, pts, win)
+                sl = _window_slice_one_sid(ev, sid, pts, win)
                 if sl is None:
-                    n_empty_grids += 1
-                    empty_row_indices.append(i)
+                    _filled += 1
+                    if _filled % _report_every == 0:
+                        if hasattr(X, "flush"):
+                            X.flush()
+                        print(f"  grid fill progress: {_filled}/{n_out}", flush=True)
                     continue
                 if spatial:
                     r, c, _e, _t, bk = sl
@@ -831,56 +991,81 @@ def materialize_dataset(
                         r, c, bk, grid_h, grid_w, n_banks, row_bs, col_bs
                     )
                     if inv_as_grid:
-                        X[i] = concat_spatial_and_inventory_channels(
+                        X[j] = concat_spatial_and_inventory_channels(
                             base, tab[i])
                     else:
-                        X[i] = base
+                        X[j] = base
                 else:
                     r, c, e, _t, _bk = sl
-                    X[i] = fill_log1p_grid(r, c, e, grid_h, grid_w, leg_in)
+                    X[j] = fill_log1p_grid(r, c, e, grid_h, grid_w, leg_in)
+                _filled += 1
+                if _filled % _report_every == 0:
+                    if hasattr(X, "flush"):
+                        X.flush()
+                    print(f"  grid fill progress: {_filled}/{n_out}", flush=True)
+            del ev
+            if spill_paths is not None and _sid_i % 2000 == 0:
+                gc.collect()
+        if spill_paths is not None:
+            gc.collect()
+        if hasattr(X, "flush"):
+            X.flush()
+        print(f"  grid fill done: {_filled}/{n_out}", flush=True)
 
     if n_empty_grids > 0:
         print(
-            f"警告：{n_empty_grids}/{n} 条样本在 mcelog 窗口内无事件（sid 缺失或窗口为空），对应 X 行为全零。",
+            f"警告：填网格前检测到 {n_empty_grids}/{n_before_drop} 条样本 mcelog 窗口为空"
+            f"（sid 缺失或窗口无事件）；未丢弃行在 X 中对应 mcelog 通道为全零。",
             flush=True,
         )
 
-    # 填网格完成后 events 不再使用；尽早释放以降低 drop/save 阶段峰值。
-    del events
+    # 填网格完成后释放 events / spill 临时文件。
+    if events is not None:
+        del events
+    if spill_paths is not None and spill_dir.is_dir():
+        shutil.rmtree(spill_dir, ignore_errors=True)
     gc.collect()
 
-    drop_empty = bool(data_cfg.get("drop_empty_mcelog_windows", True))
-    drop_empty_pos = bool(data_cfg.get("drop_empty_positive_windows", False))
-    n_before_drop = int(n)
-    n_dropped_empty = 0
-    n_empty_kept_positive = 0
-    n_dropped_empty_positive = 0
-    # 空窗 = mcelog 特征窗 [predict_ts−W, predict_ts) 内无事件。
-    # 默认仅丢负样本空窗；工程模式 drop_empty_positive_windows=true 时正样本空窗也丢弃（纯 mcelog 可学样本）。
-    if drop_empty and empty_row_indices:
-        empty_set = set(int(i) for i in empty_row_indices)
-        keep = np.ones(n, dtype=bool)
-        for i in empty_set:
-            if int(y[i]) == 0:
-                keep[i] = False
-            elif drop_empty_pos:
-                keep[i] = False
-                n_dropped_empty_positive += 1
-            else:
-                n_empty_kept_positive += 1
-        n_dropped_empty = int((~keep).sum())
-        if n_dropped_empty > 0 or n_empty_kept_positive > 0 or n_dropped_empty_positive > 0:
-            X = X[keep]
-            y = y[keep]
-            idx_df = idx_df.loc[keep].reset_index(drop=True)
-            tab = tab[keep]
-            n = int(keep.sum())
-            msg = f"已丢弃 {n_dropped_empty}/{n_before_drop} 条空 mcelog 窗口样本"
-            if drop_empty_pos:
-                msg += f"（含正样本空窗 {n_dropped_empty_positive} 条；drop_empty_positive_windows=true）"
-            else:
-                msg += f"（负样本空窗；正样本空窗保留 {n_empty_kept_positive} 条）"
-            print(msg + "。", flush=True)
+    if use_compact_x:
+        y = y[keep]
+        idx_df = idx_df.loc[keep].reset_index(drop=True)
+        tab = tab[keep]
+        n = n_kept
+    elif drop_empty and n_dropped_empty > 0:
+        # 小数据集：仍用全量 X.building，再分块紧凑写入 X.npy（体量小，无双份 OOM 风险）
+        # 注意：此处必须用 n_kept，不能用填网格阶段的 n_out（非 compact 时 n_out==原始 n）
+        y = y[keep]
+        idx_df = idx_df.loc[keep].reset_index(drop=True)
+        tab = tab[keep]
+        n = n_kept
+        x_final_path = processed_dir / "X.npy"
+        if x_final_path.is_file():
+            x_final_path.unlink()
+        X_final = np.lib.format.open_memmap(
+            str(x_final_path),
+            mode="w+",
+            dtype=np.float32,
+            shape=(n, in_ch, grid_h, grid_w),
+        )
+        keep_idx = np.flatnonzero(keep)
+        _compact_chunk = 256
+        for s in range(0, n, _compact_chunk):
+            batch = keep_idx[s : s + _compact_chunk]
+            X_final[s : s + len(batch)] = np.asarray(X[batch])
+        X_final.flush()
+        del X, X_final
+        gc.collect()
+        if x_build_path.is_file():
+            x_build_path.unlink()
+        X = np.load(x_final_path, mmap_mode="r")
+
+    if n_dropped_empty > 0 or n_empty_kept_positive > 0 or n_dropped_empty_positive > 0:
+        msg = f"已丢弃 {n_dropped_empty}/{n_before_drop} 条空 mcelog 窗口样本"
+        if drop_empty_pos:
+            msg += f"（含正样本空窗 {n_dropped_empty_positive} 条；drop_empty_positive_windows=true）"
+        else:
+            msg += f"（负样本空窗；正样本空窗保留 {n_empty_kept_positive} 条）"
+        print(msg + "。", flush=True)
     elif not drop_empty and n_empty_grids > 0:
         print(
             "提示：drop_empty_mcelog_windows=false，空窗样本仍保留（X 对应 mcelog 通道为全零）。",
@@ -905,7 +1090,21 @@ def materialize_dataset(
     meta["predict_ts"] = idx_df["predict_ts"].astype(np.float64)
     meta["empty_mcelog_window"] = empty_mcelog_flags.astype(np.int64)
 
-    np.save(processed_dir / "X.npy", X)
+    x_out = processed_dir / "X.npy"
+    if getattr(X, "filename", None) is not None:
+        # 已是 memmap：若仍为 building 文件则改名为最终 X.npy
+        src = Path(str(X.filename))
+        X.flush()
+        del X
+        gc.collect()
+        if src.resolve() != x_out.resolve():
+            if x_out.is_file():
+                x_out.unlink()
+            src.replace(x_out)
+    else:
+        np.save(x_out, X)
+        del X
+        gc.collect()
     np.save(processed_dir / "y.npy", y)
     # spatial 且 inventory 已进 X 通道时不写 tabular.npy，并删除 splits 中多余的 tabular 文件以免 validate 误判
     save_tab = not spatial or not inv_as_grid
@@ -921,7 +1120,7 @@ def materialize_dataset(
     meta.to_csv(processed_dir / "meta.csv", index=False)
 
     pos_rate = float(y.mean()) if n else 0.0
-    del X, tab
+    del tab
     gc.collect()
 
     ram_snap = ram_budget_snapshot(
@@ -965,12 +1164,13 @@ def materialize_dataset(
         "preprocess_events_finalize_parallel": bool(events_finalize_parallel),
         "preprocess_grid_fill_parallel": grid_fill_parallel_done,
         "n_empty_grids": int(n_empty_grids),
-        "n_empty_grids_dropped": int(n_dropped_empty),
+        "n_empty_grids_dropped": int(n_dropped_empty_negative),
         "n_empty_grids_kept_positive": int(n_empty_kept_positive),
         "n_empty_positive_dropped": int(n_dropped_empty_positive),
         "n_samples_before_drop": int(n_before_drop),
         "drop_empty_mcelog_windows": bool(drop_empty),
         "drop_empty_positive_windows": bool(drop_empty_pos),
+        "use_compact_x": bool(use_compact_x),
         "index_features_path": str(Path(data_cfg["index_features_path"]).resolve()),
         "time_axis": "relative_seconds_since_global_min",
         "time_epoch_offset_absolute": float(time_epoch_offset),
@@ -985,6 +1185,4 @@ def materialize_dataset(
 
     (processed_dir / "preprocess_manifest.json").write_text(json.dumps(manifest,
                                                                        indent=2), encoding="utf-8")
-    print(
-        f"Preprocess done: N={n}, pos_rate={manifest['pos_rate']:.6f}", flush=True)
     return manifest

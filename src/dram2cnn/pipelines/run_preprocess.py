@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-"""预处理入口：`materialize_dataset` 写出 `processed/`；再按配置切分至 `splits/`。
+"""预处理入口：`materialize_dataset` 写出实验 `processed_dir`；再按配置切分至 `splits_dir`。
 
-``--split-only``：跳过物化，在已有 ``processed/`` 上仅重跑切分（用于 sid vs time_stratified 对比，避免重复扫 mcelog）。
-约定见 `docs/tianchi_pipeline.md`。"""
+``--split-only``：跳过特征生成，在已有 ``processed_dir`` 上仅重跑切分（用于 sid vs time_stratified 对比，避免重复扫 mcelog）。
+说明见 `docs/tianchi_pipeline.md`。"""
 
 import argparse
 import gc
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,10 +17,29 @@ import pandas as pd
 from dram2cnn.data.splitter import split_by_sid, split_by_time, split_by_time_stratified
 from dram2cnn.data.tianchi_build import materialize_dataset
 from dram2cnn.engine.validator import validate_experiment
-from dram2cnn.utils.config import load_experiment_config
+from dram2cnn.utils.config import load_experiment_config, project_root
 from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub, assert_processed_matches_experiment
 from dram2cnn.utils.io import dump_json
 from dram2cnn.utils.preprocess_preflight import check_preprocess_raw_inputs
+
+
+def _resolve_data_dir(raw: str | Path, root: Path) -> Path:
+    p = Path(raw)
+    return p if p.is_absolute() else (root / p).resolve()
+
+
+def _clear_dir_contents(path: Path) -> None:
+    """删除目录内文件/子目录，保留目录本身（与 clean.sh 对 processed/splits 行为一致）。"""
+    if not path.is_dir():
+        path.mkdir(parents=True, exist_ok=True)
+        return
+    for child in path.iterdir():
+        if child.name == ".gitkeep":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def _run_split_phase(cfg: dict) -> str:
@@ -90,7 +110,7 @@ def _write_split_manifest(cfg: dict, split_strategy: str) -> None:
 
 
 def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_only: bool = False):
-    """两阶段：① 物化 processed/；② 切分 splits/ 并按训练集标准化。``split_only=True`` 时跳过①。"""
+    """两阶段：① 生成 processed/；② 切分 splits/ 并按训练集标准化。``split_only=True`` 时跳过①。"""
     if not split_only:
         check_preprocess_raw_inputs(exp_config)
     cfg = load_experiment_config(exp_config)
@@ -101,13 +121,26 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_onl
         if split_only:
             raise ValueError(
                 f"{exc}\n"
-                "split-only 需要与当前实验配置一致的 data/processed/；"
+                "split-only 需要与当前实验配置一致的 processed_dir；"
                 "请先对同一 index/horizon 跑完整 preprocess，或去掉 --split-only。"
             ) from exc
-        raise ValueError(
-            f"{exc}\n"
-            f"请先清空 {cfg['data']['processed_dir']} 与 {cfg['data']['splits_dir']} 后重跑 preprocess。"
-        ) from exc
+        # 完整 preprocess：旧输出与当前实验不一致时自动清空后重新生成
+        # （典型场景：04 F1 drop_empty_positive=false → 05 工程实验 true）
+        root = project_root()
+        proc_dir = _resolve_data_dir(cfg["data"]["processed_dir"], root)
+        split_dir = _resolve_data_dir(cfg["data"]["splits_dir"], root)
+        print(
+            f"提示：已有 processed 与当前实验不一致（{exc}）。\n"
+            f"将自动清空 {proc_dir} 与 {split_dir} 后重新 preprocess。",
+            flush=True,
+        )
+        _clear_dir_contents(proc_dir)
+        _clear_dir_contents(split_dir)
+        # sid 等旁路切分目录若仍指向同一 processed，也清掉，避免后续误用旧 N
+        for extra in ("data/splits_sid", "data/splits_sid_balanced"):
+            extra_p = _resolve_data_dir(extra, root)
+            if extra_p.is_dir() and extra_p.resolve() != split_dir.resolve():
+                _clear_dir_contents(extra_p)
 
     manifest: dict
     if split_only:
@@ -115,7 +148,11 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_onl
         if not man_p.is_file():
             raise FileNotFoundError(f"split-only 需要 {man_p}；请先运行完整 preprocess。")
         manifest = json.loads(man_p.read_text(encoding="utf-8"))
-        print(f"Split-only: 复用 processed/（n_samples={manifest.get('n_samples')}），策略={cfg['data'].get('split_strategy')}", flush=True)
+        print(
+            f"Split-only: 复用 processed_dir（n_samples={manifest.get('n_samples')}），"
+            f"策略={cfg['data'].get('split_strategy')}",
+            flush=True,
+        )
     else:
         manifest = materialize_dataset(
             cfg["data"],
@@ -127,7 +164,12 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_onl
 
     split_strategy = _run_split_phase(cfg)
     _write_split_manifest(cfg, split_strategy)
-    print("Preprocess + split completed.", manifest.get("grid_shape"), flush=True)
+    print(
+        f"Preprocess + split completed: N={manifest.get('n_samples')}, "
+        f"pos_rate={float(manifest.get('pos_rate', 0.0)):.6f}, "
+        f"grid_shape={manifest.get('grid_shape')}",
+        flush=True,
+    )
 
     validate_experiment(cfg, require_splits=True)
     print("Validate after preprocess: ok", flush=True)
@@ -135,7 +177,7 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml", *, split_onl
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="从 raw 表构建 X/y/meta 与 manifest，并切分、标准化为 data/splits。",
+        description="从 raw 表构建 X/y/meta 与 manifest，并切分、标准化到实验 YAML 指定的 splits_dir。",
         epilog="示例: python -m dram2cnn.pipelines.run_preprocess configs/experiments/exp_baseline.yaml",
     )
     parser.add_argument(

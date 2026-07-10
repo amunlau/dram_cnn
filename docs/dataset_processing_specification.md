@@ -13,7 +13,7 @@
 
 为实现上述建模，数据处理遵循三条主线：（1）用相对秒统一 mcelog、tickets、索引的时间轴，并以半开特征窗、闭标签窗保证「只用过去预测未来」；（2）用索引表显式列出样本锚点，而不是枚举所有 \((sid, t)\) 组合；（3）将窗内 CE 分箱为固定尺寸空间热图，再经 log1p 与 robust 归一化后供 GridCNN 训练。下文按「任务与参数 → 时间与窗口 → 处理流程 → 算例」展开，并在各节说明**为何如此设计**以及**字段、公式与代码的对应关系**。
 
-**关键词**：样本构造；时间窗口；空间热图；索引采样；标签对齐；类别不平衡
+**关键词**：样本构造；时间窗口；空间热图；索引采样；标签关联；类别不平衡
 
 ---
 
@@ -27,11 +27,11 @@
 
 **对应到数据与代码**：
 
-| 概念 | 含义 | 主要数据来源 | 代码字段 / 产物 |
+| 概念 | 含义 | 主要数据来源 | 代码字段 / 输出 |
 |------|------|--------------|-----------------|
 | 锚点 | 预测发生的时刻 | 索引表 `predict_time` → `predict_ts` | `meta.csv` 中的 `predict_ts` |
-| 输入特征 | 锚点**之前** \(W\) 秒内的 CE 空间分布 + 硬件属性 | `mcelog.csv`、`inventory.csv` | 预处理产物 `X.npy`（及可选 `tabular.npy`） |
-| 监督标签 | 锚点**之后** \(H\) 秒内是否故障 | `trouble_tickets.csv` | 预处理产物 `y.npy` |
+| 输入特征 | 锚点**之前** \(W\) 秒内的 CE 空间分布 + 硬件属性 | `mcelog.csv`、`inventory.csv` | 预处理输出 `X.npy`（及可选 `tabular.npy`） |
+| 监督标签 | 锚点**之后** \(H\) 秒内是否故障 | `trouble_tickets.csv` | 预处理输出 `y.npy` |
 | 特征窗长度 | 看多长的历史 CE | `configs/data.yaml` → `window_seconds` | 符号 \(W\)，默认 300 秒 |
 | 标签窗长度 | 预测多长的未来 | `label_horizon_seconds`（别名 `label_backtrace_seconds`） | 符号 \(H\)，默认 300 秒 |
 
@@ -58,7 +58,7 @@
 | \(W\) | 300 | 特征看多长历史 | `data.window_seconds` | `window_slice(..., window_sec=W)` |
 | \(H\) | 300 | 标签看多长未来 | `data.label_horizon_seconds` | `merge_ticket_labels(..., horizon=H)` |
 
-**表 2** 索引采样（仅影响「有哪些锚点」，不改变打标公式）
+**表 2** 索引采样（仅影响「有哪些锚点」，不改变标注公式）
 
 | 字段 | 默认值 | 解决什么问题 | 配置位置 | 实现位置 |
 |------|--------|--------------|----------|----------|
@@ -106,7 +106,7 @@
 | 索引 / 预处理内部 | `predict_ts` | 相对秒数值，即上式读回后的秒数 |
 | `preprocess_manifest.json`、索引 `*.stats.json` | `time_epoch_offset_absolute` | 即 \(t_0\)，用于校验索引与预处理是否同一套时间轴 |
 
-**注意**：冒烟实验若 `mcelog_scan_rows=800000`，则 \(t_0\) 仅为**前 80 万行**内的最早时间，不一定是全文件最小值；`time_axis` 会警告。索引 sidecar 中的 `mcelog_scan_rows` 须与预处理 `mcelog_max_rows` 一致，否则 \(t_0\) 或 sid 时间界可能不匹配。
+**注意**：冒烟实验若 `mcelog_scan_rows=800000`，则 \(t_0\) 仅为**前 80 万行**内的最早时间，不一定是全文件最小值；`time_axis` 会警告。索引附属统计文件中的 `mcelog_scan_rows` 须与预处理 `mcelog_max_rows` 一致，否则 \(t_0\) 或 sid 时间界可能不匹配。
 
 ### 2.2 特征窗与标签窗：为何半开与闭区间不同
 
@@ -176,9 +176,9 @@ t_{\min} + W \;\le\; t \;\le\; t_{\max} - H.
 | 全局负样本、近故障困难负样本 | \(t \ge t_{\min}+W\) | \(t \le t_{\max}-H\) | tickets 判定 \(y=0\)，且特征、标签窗均落在 mcelog 跨度内 |
 | 正样本（工单驱动） | \(t \ge \max(ft-H,\, t_{\min}+W)\) | \(t \le ft\)（可 \(ft>t_{\max}\)） | 已知 \(ft\) 保证 \(y=1\) |
 
-#### 墙钟对齐
+#### 系统时钟整点同步
 
-本仓库**默认不**将锚点对齐到整 5 分钟墙钟（如 03:05:00）；锚点由相对秒步长生成，索引 CSV 中秒数常为 :17、:41 等，属正常现象。任务含义仍是：在 `predict_ts` 用过去 \(W\) 秒预测未来 \(H\) 秒，与 cron 是否整点无关。
+本仓库**默认不**将锚点同步到系统时钟整 5 分钟（如 03:05:00）；锚点由相对秒步长生成，索引 CSV 中秒数常为 :17、:41 等，属正常现象。任务含义仍是：在 `predict_ts` 用过去 \(W\) 秒预测未来 \(H\) 秒，与 cron 是否整点无关。
 
 ---
 
@@ -225,23 +225,23 @@ flowchart TB
 
 | 阶段 | 输入 | 输出 | 下游依赖哪些字段 | 若不一致会怎样 |
 |------|------|------|------------------|----------------|
-| 索引 | mcelog、tickets | `index CSV`、`*.stats.json` | `window_seconds`、`label_horizon_seconds`、`time_epoch_offset_absolute`、`mcelog_scan_rows` | preprocess 校验失败或时间/窗口错位 |
+| 索引 | mcelog、tickets | `index CSV`、`*.stats.json` | `window_seconds`、`label_horizon_seconds`、`time_epoch_offset_absolute`、`mcelog_scan_rows` | 预处理校验失败或时间/窗口错位 |
 | 预处理 | 索引 + mcelog + tickets + inventory | `X.npy`、`y.npy`、`preprocess_manifest.json` | `grid_shape`、`in_channels` ↔ `model.yaml` | 训练/validate 报形状错误 |
-| 切分 | processed 产物 | `X_train/val/test.npy`、`normalization_stats.json` | 归一化统计量仅来自训练集 | 验证/测试集泄漏统计量则评估偏乐观 |
+| 切分 | processed 输出 | `X_train/val/test.npy`、`normalization_stats.json` | 归一化统计量仅来自训练集 | 验证/测试集泄漏统计量则评估偏乐观 |
 | 训练 | splits + model 配置 | checkpoint | `tabular_dim` 与是否有 `tabular_*.npy` 一致 | DataLoader 维度报错 |
 
 **重跑规则**：修改 \(W\)、\(H\)、网格分箱或 `in_channels` 等 → 清空 `processed/`、`splits/` 并重新预处理（索引往往也需重建）。仅改模型 backbone 结构 → 只需重新训练。
 
 ### 3.2 索引表构建：三类锚点从何而来
 
-**目的**：生成仅含 `sid`、`predict_time` 的 CSV，列出所有样本锚点；**不在此阶段写** \(\mathbf{X}\)，但会用与预处理相同的规则预打标以控制正负比例。
+**目的**：生成仅含 `sid`、`predict_time` 的 CSV，列出所有样本锚点；**不在此阶段写** \(\mathbf{X}\)，但会用与预处理相同的规则预标注以控制正负比例。
 
 **流程**（`run_build_index` → `build_index_to_csv`）：
 
 1. 扫描 mcelog → 每个 sid 的 \(t_{\min}, t_{\max}\)（与预处理相同的 CE 过滤）；
 2. 读取 tickets → 每个 sid 的故障时刻 \(ft\)；
 3. 对每个 \(ft\) 生成**正样本区**与**近故障困难负样本**候选；
-4. 用 `merge_ticket_labels` 打标，拆出 \(y=1\) 与近故障 \(y=0\)；
+4. 用 `merge_ticket_labels` 标注，拆出 \(y=1\) 与近故障 \(y=0\)；
 5. 按 `target_positive_ratio` 在 \([t_{\min}+W,\, t_{\max}-H]\) 内补充**全局负样本**；
 6. 随机打乱，写入 CSV 及 `*.stats.json`。
 
@@ -265,7 +265,7 @@ n_- = \mathrm{round}\left( n_+ \cdot \frac{1-\rho}{\rho} \right).
 
 | 参数 | smoke | full | 差异原因 |
 |------|-------|------|----------|
-| `max_rows` | 500 | 不限制 | 冒烟快速跑通 |
+| `max_rows` | 500 | 不限制 | 冒烟快速验证 |
 | `target_positive_ratio` | 0.08 | 0.15 | 全量更接近真实稀少正例 |
 | `positive_prefault_seconds` | 3600 | 86400 | 全量覆盖更长“故障前缘” |
 | `neg_sample_strategy` | random | uniform | 冒烟省时间；全量覆盖更均匀 |
@@ -354,7 +354,7 @@ flowchart TB
 
 **问题**：log1p 后各网格位置量级差异大，且稀疏；若用全数据统计量，验证/测试信息会泄漏到训练。
 
-**做法**：默认 `normalization_method: robust`——**仅在训练集**上估计每个 \((c,h,w)\) 的中位数与 IQR，再应用到 val/test；IQR 过小则回退 MAD、标准差；最后按 `normalization_clip` 截断到 \([-20, 20]\)。
+**做法**：默认 `normalization_method: robust`——**仅在训练集**上估计每个 \((c,h,w)\) 的中位数与 IQR，再应用到 val/test；IQR 过小则改用 MAD、标准差；最后按 `normalization_clip` 截断到 \([-20, 20]\)。
 
 | 项目 | 训练集 | 验证 / 测试集 |
 |------|--------|----------------|
@@ -412,7 +412,7 @@ inventory 15 维按 `Server_A` 的台账 one-hot 后，广播至全部 \(128 \ti
 |------|------|----------------|
 | 相对秒、`predict_ts` | `time_axis.py` | 第 2.1 节 |
 | 锚点区间、三类采样 | `index_builder.py` | 第 2.3、3.2 节 |
-| 窗口切片、热图、标签、manifest | `tianchi_build.py` | 第 2.2、3.3 节 |
+| 窗口切片、热图、标签、清单 | `tianchi_build.py` | 第 2.2、3.3 节 |
 | 切分、robust 归一化 | `splitter.py` | 第 3.4 节 |
 | inventory one-hot | `inventory_encode.py` | 表 3 |
 | 默认参数 | `configs/data.yaml` | 第 1.2 节 |

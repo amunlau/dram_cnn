@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-"""评估预测 CSV 并导出分析产物。
+"""评估预测 CSV 并导出分析输出。
 
-主 KPI（``metrics.json`` 顶层字段）= **部署阶段评价**：infer 使用的验证集阈值下的 ``y_pred``。
+主评价指标（``metrics.json`` 顶层字段）= **部署阶段评价**：infer 使用的验证集阈值下的 ``y_pred``。
 另写入 ``deployment`` / ``oracle_on_test`` 两段结构化说明，避免与测试集事后最优阈值混淆。
 ``best_threshold_on_eval.json`` 仅保留 oracle 阈值摘要（与训练 ``best_threshold.json`` 区分）。
 """
@@ -53,14 +53,14 @@ def evaluate(pred_csv: str, output_json: str) -> None:
         except (TypeError, ValueError):
             deploy_threshold = None
 
-    # 部署阶段评价：infer 写出的 y_pred（验证集搜阈后的阈值）
+    # 部署阶段评价：infer 写出的 y_pred（验证集阈值搜索后的阈值）
     metrics_deploy = classification_metrics(y_true, df["y_pred"], y_prob_series)
     payload: dict = {
         **metrics_deploy,
         "kpi_scope": "deployment",
         "deployment": {
             "threshold": deploy_threshold,
-            "threshold_source": "validation best_threshold.json（infer 使用；汇报主 KPI）",
+            "threshold_source": "validation best_threshold.json（infer 使用；汇报主评价指标）",
             "metrics": dict(metrics_deploy),
         },
     }
@@ -74,7 +74,7 @@ def evaluate(pred_csv: str, output_json: str) -> None:
         metrics_oracle = classification_metrics(y_true, y_pred_oracle, y_prob_series)
         payload["oracle_on_test"] = {
             "threshold": float(oracle["threshold"]),
-            "threshold_source": "测试集标签事后网格搜索（仅分析，不可作部署 KPI）",
+            "threshold_source": "测试集标签事后网格搜索（仅分析，不可作部署阶段评价指标）",
             "metrics": dict(metrics_oracle),
         }
         dump_json(run_dir / "best_threshold_on_eval.json", oracle)

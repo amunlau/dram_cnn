@@ -1,7 +1,7 @@
-"""预处理阶段 CPU 并行度（与 `configs/data.yaml` 对齐）。
+"""预处理阶段 CPU 并行度（与 `configs/data.yaml` 一致）。
 
 Linux 上 `tianchi_build` 对 **mcelog 按 sid 时间排序** 与 **按索引行填网格 X** 使用 ``fork`` + ``Pool``；
-进程 budget 由本模块解析，避免在多处硬编码比例。
+进程 budget 由本模块解析，避免在多处写死比例常数。
 
 规则：
 
@@ -240,7 +240,7 @@ def preprocess_workers_log_line(
     mcelog_path: Path | str | None = None,
     mcelog_max_rows: int | None = None,
 ) -> str:
-    """供 ``materialize_dataset`` 打印一行人类可读说明。"""
+    """供 ``materialize_dataset`` 打印一行便于阅读的说明。"""
     if mcelog_max_rows is None:
         cap_raw = data_cfg.get("mcelog_max_rows")
         mcelog_max_rows = int(cap_raw) if cap_raw is not None else None

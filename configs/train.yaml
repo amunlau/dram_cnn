@@ -12,15 +12,15 @@ max_grad_norm: 1.0
 cudnn_benchmark: true
 # 验证指标连续 `patience` 轮无提升则早停（默认 50；冒烟实验 yaml 可覆盖为更小值）。
 patience: 50
-# 项目 KPI 为 F1：早停与 checkpoint 选取验证集阈值搜索后的 best_f1（与 threshold_search / infer 一致）。
+# 项目主评价指标为 F1：早停与 checkpoint 选取验证集阈值搜索后的 best_f1（与 threshold_search / infer 一致）。
 # 可选 avg_precision（阈值无关排序）、roc_auc、f1_at_0p5；详见 docs/project_configuration_reference.md §7.2。
 early_stop_metric: best_f1
 
 imbalance:
   # class weight=[1, w_pos] 传入 classification_loss（加权 CE / 可选 Focal）
   use_class_weight: true
-  # sqrt: w_pos = min(sqrt(neg/pos), cap)；GridCNN-Deep 默认推荐（各实验 yaml 已对齐）。
-  # inverse_freq: w_pos = min(neg/pos, cap)；更激进，勿与过高 oversample 叠加。
+  # sqrt: w_pos = min(sqrt(neg/pos), cap)；GridCNN-Deep 默认推荐（各实验 yaml 已一致）。
+  # inverse_freq: w_pos = min(neg/pos, cap)；更激进，不得与过高 oversample 叠加。
   weight_scheme: sqrt
   positive_weight_cap: 30.0
   # 0 / null = 普通加权 CE。GridCNN-Deep 在默认 lr 下 focal_gamma>0 易 NaN，生产实验保持 0。

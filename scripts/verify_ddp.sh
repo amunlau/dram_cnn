@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 验证 train / infer / optuna 在 ≥2 GPU 时确实走 torchrun 多卡（读取 launch plan 与训练日志）
+#
+# 前置：已对 EXP 完成 preprocess（默认 exp_ddp_verify 使用 data/processed_smoke 与 data/splits_smoke，
+#       可先 bash scripts/preprocess.sh configs/experiments/exp_ddp_verify.yaml 或 exp_baseline.yaml）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

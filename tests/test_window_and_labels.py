@@ -41,7 +41,7 @@ def test_window_slice_half_open() -> None:
 
 
 def test_merge_ticket_labels_closed_interval(tmp_path: Path) -> None:
-    """闭区间 [predict_ts, predict_ts+H]：边界 failed_ts 应打标。"""
+    """闭区间 [predict_ts, predict_ts+H]：边界 failed_ts 应标注。"""
     t0 = pd.Timestamp("2000-01-01 00:00:00")
     offset = float((t0 - pd.Timestamp("1970-01-01")) / pd.Timedelta(seconds=1))
 

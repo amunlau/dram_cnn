@@ -33,10 +33,10 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
         dep = (payload.get("deployment") or {}).get("metrics") or payload
         ora = (payload.get("oracle_on_test") or {}).get("metrics") or {}
         print(
-            f"  deployment KPI: F1={dep.get('f1'):.4f} P={dep.get('precision'):.4f} "
+            f"  部署阶段评价指标: F1={dep.get('f1'):.4f} P={dep.get('precision'):.4f} "
             f"R={dep.get('recall'):.4f} threshold={payload.get('deployment', {}).get('threshold')}"
             if dep.get("f1") is not None
-            else "  deployment KPI: (see metrics.json)"
+            else "  部署阶段评价指标: (see metrics.json)"
         )
         if ora.get("f1") is not None:
             print(

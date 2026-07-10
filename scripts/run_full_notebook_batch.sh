@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 全量 CLI 批量：工程向（召回/精度 time+sid）→ F1 最大化（time+sid）
+# 全量 CLI 批量：工程实验（召回/精度 time+sid）→ F1 最大化（time+sid）
 #
-# 前置（Phase A 工程向）：
+# 前置（Phase A 工程实验）：
 #   bash scripts/build_index.sh full
 #   bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml
-#   （工程向 preprocess：drop_empty_positive_windows=true，与 F1 不可混用）
+#   （工程实验预处理：drop_empty_positive_windows=true，与 F1 不可混用）
 #
-# Phase B 会清空 data/processed、splits、splits_sid 并重跑 F1 preprocess。
+# Phase B 会清空 data/processed、splits、splits_sid 并重新执行 F1 preprocess。
 #
 # 用法：bash scripts/run_full_notebook_batch.sh
 # 日志：runs/pipeline-logs/full_notebook_batch.log
@@ -34,7 +34,7 @@ if [[ ! -f "${PROC_MAN}" ]]; then
   exit 1
 fi
 
-# ---------- Phase A: 工程向（复用工程向 preprocess 产物）----------
+# ---------- Phase A: 工程实验（复用工程实验预处理输出）----------
 step "Phase A: recall time"
 run bash scripts/train_ddp.sh configs/experiments/exp_full_recall_ddp.yaml
 run bash scripts/infer.sh configs/experiments/exp_full_recall_ddp.yaml
@@ -75,5 +75,5 @@ run bash scripts/evaluate.sh configs/experiments/exp_full_f1_sid.yaml
 
 step "ALL DONE $(date)"
 
-step "Aggregate deployment KPI tables"
+step "Aggregate 部署阶段评价指标 tables"
 python3 -m dram2cnn.utils.deployment_kpi

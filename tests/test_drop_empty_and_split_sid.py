@@ -69,15 +69,65 @@ def test_drop_empty_mcelog_windows_keeps_positive(tmp_path: Path) -> None:
         "dropout": 0.0,
     }
     manifest = materialize_dataset(data_cfg, model_cfg, proc)
+    X = np.load(proc / "X.npy", mmap_mode="r")
     y = np.load(proc / "y.npy")
     meta = pd.read_csv(proc / "meta.csv")
     assert len(y) < 6
+    assert X.shape[0] == len(y) == len(meta) == int(manifest["n_samples"])
     assert int(y.sum()) >= 1
     assert "empty_mcelog_window" in meta.columns
     assert manifest["drop_empty_mcelog_windows"] is True
     assert int(manifest["n_samples_before_drop"]) == 6
     assert int(manifest["n_empty_grids_dropped"]) >= 1
     assert int(manifest["n_empty_grids_kept_positive"]) >= 0
+    n_dropped_neg = int(manifest["n_empty_grids_dropped"])
+    n_dropped_pos = int(manifest.get("n_empty_positive_dropped") or 0)
+    assert int(manifest["n_samples"]) == 6 - n_dropped_neg - n_dropped_pos
+    assert n_dropped_pos == 0
+
+
+def test_drop_empty_positive_windows_counts(tmp_path: Path) -> None:
+    """工程模式：正样本空窗也丢弃；manifest 负/正空窗计数分开。"""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    proc = tmp_path / "processed"
+    _write_minimal_raw(raw)
+
+    data_cfg = {
+        "mcelog_path": str(raw / "mcelog.csv"),
+        "tickets_path": str(raw / "tickets.csv"),
+        "index_features_path": str(raw / "index.csv"),
+        "inventory_path": None,
+        "grid_representation": "legacy_rc_et",
+        "window_seconds": 300,
+        "label_horizon_seconds": 3600,
+        "label_failure_types": [1],
+        "grid_max_row": 16,
+        "grid_max_col": 16,
+        "mcelog_chunk_rows": 1000,
+        "drop_empty_mcelog_windows": True,
+        "drop_empty_positive_windows": True,
+    }
+    model_cfg = {
+        "in_channels": 3,
+        "grid_height": 8,
+        "grid_width": 8,
+        "num_classes": 2,
+        "backbone_channels": [8, 16],
+        "head_hidden": 16,
+        "tabular_dim": 0,
+        "tabular_fuse_dim": 8,
+        "dropout": 0.0,
+    }
+    manifest = materialize_dataset(data_cfg, model_cfg, proc)
+    X = np.load(proc / "X.npy", mmap_mode="r")
+    y = np.load(proc / "y.npy")
+    n_dropped_neg = int(manifest["n_empty_grids_dropped"])
+    n_dropped_pos = int(manifest["n_empty_positive_dropped"])
+    assert X.shape[0] == len(y) == int(manifest["n_samples"])
+    assert int(manifest["n_samples"]) == 6 - n_dropped_neg - n_dropped_pos
+    assert n_dropped_pos >= 1 or int(manifest["n_empty_grids_kept_positive"]) == 0
+    assert manifest["drop_empty_positive_windows"] is True
 
 
 def test_split_by_sid_no_sid_leakage(tmp_path: Path) -> None:

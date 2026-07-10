@@ -1,4 +1,4 @@
-"""Notebook / 批量流水线辅助：marker 断点续跑、preprocess 前预检。"""
+"""Notebook / 批量流水线辅助：断点标记中断后续跑、preprocess 前预先检查。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def run_step(
     *,
     project_root_path: Path | None = None,
 ) -> None:
-    """执行一步 shell 命令；成功则写 marker，便于断点续跑。"""
+    """执行一步 shell 命令；成功则写 marker，便于中断后续跑。"""
     root = project_root_path or project_root()
     marker_dir = pipeline_marker_dir(root)
     log_dir = pipeline_log_dir(root)
@@ -133,7 +133,7 @@ def resolve_feature_xy_paths(
 ) -> tuple[Path, Path, str]:
     """按实验配置解析特征 ``(X_path, y_path, source_label)``。
 
-    优先 ``processed_dir`` 下的全量池 ``X.npy``；否则回退 ``splits_dir/X_train.npy``。
+    优先 ``processed_dir`` 下的全量池 ``X.npy``；否则改用 ``splits_dir/X_train.npy``。
     两者均不存在时抛出 ``FileNotFoundError``。
     """
     root = root or project_root()
@@ -173,7 +173,7 @@ def resolve_feature_xy_paths(
         f"实验 {exp_path} 下未找到特征文件：\n"
         f"  processed: {proc / 'X.npy'}\n"
         f"  splits:    {spl / 'X_train.npy'}\n"
-        "请检查 data/raw/、实验 YAML 的 processed_dir/splits_dir，或重跑 preprocess。"
+        "请检查 data/raw/、实验 YAML 的 processed_dir/splits_dir，或重新执行预处理。"
     )
 
 
@@ -205,7 +205,7 @@ def preflight_full_scale_index(
     root: Path | None = None,
     context: str = "preflight",
 ) -> dict:
-    """全量实验预检：刷新模块缓存并确认 ``index_features_path`` 非演示 stub。"""
+    """全量实验预先检查：刷新模块缓存并确认 ``index_features_path`` 非演示 stub。"""
     reload_dram2cnn_modules()
     from dram2cnn.utils.experiment_guards import assert_full_scale_index_not_stub
 
@@ -241,7 +241,7 @@ def preflight_splits_vs_model(exp_yaml: str | Path, root: Path | None = None) ->
     else:
         print(
             f"[preflight] 不匹配 ({exp_yaml}): X_train=({c},{h},{w}) "
-            f"vs model=({exp_c},{exp_h},{exp_w})；删对应 preprocess/resplit marker 后重跑"
+            f"vs model=({exp_c},{exp_h},{exp_w})；删对应 preprocess/resplit marker 后重新执行"
         )
 
 

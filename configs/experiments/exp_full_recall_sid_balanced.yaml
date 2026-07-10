@@ -1,4 +1,4 @@
-# 全量 sid + 平衡工程向
+# 全量 sid + 平衡工程实验
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml
@@ -20,6 +20,8 @@ overrides:
     time_split:
       min_pos_per_split: 1
     mcelog_chunk_rows: 400000
+    ram_budget_frac: 0.85
+    preprocess_workers: 1
   train:
     early_stop_metric: avg_precision
     imbalance:

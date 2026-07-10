@@ -2,10 +2,10 @@
 
 ## 切换 horizon / 索引后 validate 报错
 
-- **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）；或 preprocess 报 **`索引 sidecar label_horizon_seconds=300 与当前配置 1800 不一致`**。  
-- **原因**：磁盘上实验 `processed_dir` / 索引 sidecar 仍是 **baseline（5min）** 产物，与 `exp_horizon_30m.yaml` 等配置不匹配。  
+- **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）；或预处理报 **`索引附属统计文件中的 label_horizon_seconds=300 与当前配置 1800 不一致`**。  
+- **原因**：磁盘上实验 `processed_dir` / 索引附属统计文件仍是 **baseline（5min）** 输出，与 `exp_horizon_30m.yaml` 等配置不匹配。  
 - **处理**：`bash scripts/build_horizon_indexes.sh smoke`（或 `full`）→ 确认实验 YAML 的 `index_features_path` → 清空 **horizon 专用目录**（30min 冒烟：`data/processed_horizon_30m_smoke/*`、`data/splits_horizon_30m_smoke/*`）→ **`bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml`**。  
-- **配置级预检**（尚未对该 horizon 重跑 preprocess）：**`bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml`**（跳过 manifest horizon 比对，仅检查 raw 路径与 processed 形状）。
+- **配置级预先检查**（尚未对该 horizon 重新执行预处理）：**`bash scripts/validate.sh --no-require-splits configs/experiments/exp_horizon_30m.yaml`**（跳过清单中的 horizon 比对，仅检查 raw 路径与 processed 形状）。
 
 ## `use_weighted_sampler` 与 `positive_oversample_factor>1` 冲突
 
@@ -20,11 +20,11 @@
 
 ## `X_train.npy` 与 model 的 C/H/W 不一致
 
-重跑 `bash scripts/preprocess.sh <实验 yaml>`，并确认 `configs/model.yaml` 的 `grid_height/grid_width/in_channels` 与 `preprocess_manifest.json` 一致。
+重新执行 `bash scripts/preprocess.sh <实验 yaml>`，并确认 `configs/model.yaml` 的 `grid_height/grid_width/in_channels` 与 `preprocess_manifest.json` 一致。
 
 ## 清空 processed/splits 后 `scripts/validate.sh` 报错
 
-尚未重新预处理时，切分文件不存在属正常。可先 **`bash scripts/validate.sh configs/experiments/<exp>.yaml --no-require-splits`**（仅校验配置与原始文件路径），完成 preprocess 后再去掉 `--no-require-splits` 做完整校验。
+尚未重新预处理时，切分文件不存在属正常。可先 **`bash scripts/validate.sh configs/experiments/<exp>.yaml --no-require-splits`**（仅校验配置与原始文件路径），完成预处理后再去掉 `--no-require-splits` 做完整校验。
 
 ## `ModuleNotFoundError: dram2cnn`
 
@@ -34,9 +34,9 @@
 
 - 调大 `mcelog_chunk_rows` 不一定减内存；可先设 `data.mcelog_max_rows`、`data.max_index_rows` 做子集试验。
 - 全量训练前将二者设为 `null`。
-- **耗时构成**：顺序扫描 **整表 mcelog** 写入 buckets → **按 sid 做时间排序** → **按索引行填网格 X**。后两段在 **Linux** 上均可按 `preprocess_workers` / `preprocess_parallel_frac` 多进程加速（`fork` + 写时复制）；`preprocess_workers: null` 时默认 **`preprocess_parallel_frac: 0.6`**（约 **60%** `os.cpu_count()` 逻辑核作为进程 budget，见 `dram2cnn.utils.preprocess_parallelism`）；manifest 中 `preprocess_events_finalize_parallel` / `preprocess_grid_fill_parallel` 标明是否启用。**顺序读 CSV** 本身仍为单线程流式读取。Windows / macOS 对上述两段保持单进程。
-- **同配置重跑 preprocess**：可直接再次 `bash scripts/preprocess.sh`；split 阶段会覆盖实验 `splits_dir` 并刷新归一化（无需手动删 `normalization_stats.json`）。更换索引/horizon/网格时仍须清空该实验的 `processed_dir` 与 `splits_dir`。
-- **64GB 机器 OOM（全量 preprocess）**：全量索引约 **66k 行**时，物化阶段会按索引行分配 X（约 **31 GiB**）；经 `drop_empty_mcelog_windows` 后落盘约 **35k 行 / ~17 GiB**（见 manifest `n_samples_before_drop` / `n_samples`）。默认 **`ram_budget_frac: 0.5`** 将 fork worker 压至 **1**；split/归一化已改为 **memmap + 分块写出 + 按通道归一化**（manifest 含 `split_normalize_estimated_peak_gib`）。启动日志「估算峰值仍超预算」针对 **物化阶段（66k + events）**，属保守预期。若仍 OOM：在**终端**跑 preprocess（勿在 Jupyter 内叠加 Kernel 内存）。**显存** batch 上限仍由 `gpu.vram_budget_frac: 0.8` 控制，与此无关。
+- **耗时构成**：顺序扫描 **整表 mcelog** 写入 buckets → **按 sid 做时间排序** → **按索引行填网格 X**。排序阶段在 Linux 上可按 `preprocess_workers` / `preprocess_parallel_frac` 多进程加速；**填网格**在小样本（冒烟）可走 `fork` Pool，**全量**因 compact memmap（预分配 >8GiB 且有空窗丢弃）通常为**单进程**（预处理清单中的 `preprocess_grid_fill_parallel=false`）。`preprocess_workers: null` 时默认 **`preprocess_parallel_frac: 0.6`**。**顺序读 CSV** 仍为单线程。Windows / macOS 保持单进程。
+- **同配置重新执行预处理**：可直接再次 `bash scripts/preprocess.sh`；split 阶段会覆盖实验 `splits_dir` 并刷新归一化（无需手动删 `normalization_stats.json`）。更换索引/horizon/网格时仍须清空该实验的 `processed_dir` 与 `splits_dir`。
+- **64GB 机器 OOM（全量预处理）**：全量索引 **66320** 行；若按全量预分配 X 约 **31 GiB**，但有空窗丢弃且体量 >8GiB 时走 **compact** 路径，直接按保留行数分配。**F1 主实验**（`drop_empty_positive_windows: false`）约 **N≈35654 / ~17 GiB**；**工程实验**（`true`）约 **N≈31060 / ~15 GiB**（见预处理清单中的 `n_samples_before_drop` / `n_samples` / `n_empty_positive_dropped`）。全量实验 YAML 覆盖 **`ram_budget_frac: 0.85` + `preprocess_workers: 1`**（`data.yaml` 默认仍为 0.5）。split/归一化为 **memmap + 分块写出**。若仍 OOM：在**终端**执行预处理（勿在 Jupyter 内叠加 Kernel 内存）。**显存** batch 上限仍由 `gpu.vram_budget_frac: 0.8` 控制，与此无关。
 - 若日志出现 fork 与多线程告警，可在运行预处理前设 **`export OMP_NUM_THREADS=1`**（`scripts/lib/env_perf.sh` 已默认设置）。
 
 ## 推理 meta 列
@@ -45,84 +45,84 @@
 
 ## `tabular_*.npy` 缺失或与 `model.tabular_dim` 不一致
 
-- **`spatial_heatmap` + `inventory_as_grid_channels: true`**：预处理**不写** `tabular.npy`，此时 **`model.tabular_dim` 应为 0**，切分目录下**不应**存在 `tabular_*.npy`（若有则删 splits 或重跑 preprocess）。
+- **`spatial_heatmap` + `inventory_as_grid_channels: true`**：预处理**不写** `tabular.npy`，此时 **`model.tabular_dim` 应为 0**，切分目录下**不应**存在 `tabular_*.npy`（若有则删 splits 或重新执行预处理）。
 - **`legacy_rc_et`** 或 **spatial 且 inventory 独立写入 tabular**：需要 **`tabular_*.npy`**，且 **`model.tabular_dim`** 必须等于 **`TABULAR_DIM`（15）**（与 `preprocess_manifest.json` 一致）；`load_experiment_config` 会对错误维度报错。
 - **禁止混用**：`tabular_dim: 0` 的配置与含 **`tabular_*.npy`** 的切分目录不能搭配使用（或反之）。
 
-## EDA Notebook 与 `data.yaml` 键名
+## EDA笔记本与 `data.yaml` 键名
 
-`01_eda.ipynb` 中 mcelog 分块大小应使用 **`mcelog_chunk_rows`**（与 `configs/data.yaml` 一致，勿用 `mcelog_chunksize`）。Notebook 按该大小**分块流式读取直至文件末尾**，汇总 `error_type` 至 `outputs/tables/eda_mcelog_summary.csv`（全文件统计；`mcelog_chunk_rows` 只影响单次读入行数）。
+`01_eda.ipynb` 中 mcelog 分块大小应使用 **`mcelog_chunk_rows`**（与 `configs/data.yaml` 一致，不得使用 `mcelog_chunksize`）。笔记本按该大小**分块流式读取直至文件末尾**，汇总 `error_type` 至 `outputs/tables/eda_mcelog_summary.csv`（全文件统计；`mcelog_chunk_rows` 只影响单次读入行数）。
 
-## Notebook 单元格输出与源码不一致
+## 笔记本单元格输出与源码不一致
 
-Jupyter 会持久化单元格输出；若 Notebook 显示与当前源码不符的 traceback，请 **Kernel → Restart** 后自上而下重新执行，或使用菜单 **「清除所有输出」** 后再跑。配置校验使用 **`data.window_seconds`**。
+Jupyter 会持久化单元格输出；若笔记本显示与当前源码不符的 traceback，请 **Kernel → Restart** 后自上而下重新执行，或使用菜单 **「清除所有输出」** 后再跑。配置校验使用 **`data.window_seconds`**。
 
 ## `03_error_analysis.ipynb` 仅分析已有 `predictions.csv`
 
-若已把 `predictions.csv` 放在 `runs/<run_name>/.latest_infer_session/`（或平铺目录），Notebook **不会**强制 `load_experiment_config`（避免缺 `index_features_path` 时无法打开分析）。若需自动跑 preprocess/train/infer，仍会加载完整配置，此时必须齐备 `data/raw` 与索引表。
+若已把 `predictions.csv` 放在 `runs/<run_name>/.latest_infer_session/`（或平铺目录），笔记本**不会**强制 `load_experiment_config`（避免缺 `index_features_path` 时无法打开分析）。若需自动执行预处理/train/infer，仍会加载完整配置，此时必须齐备 `data/raw` 与索引表。
 
 ## 预处理 `pos_rate=0` 或训练日志里 AUC / PR-AUC 全是 nan
 
-- **含义**：索引行与工单打标规则对不上，或 **train/val 某一档没有正样本**（仅在使用 `split_strategy: time` 且无分层时常见），验证集上 ROC/PR 无法定义。
-- **冒烟模式**：默认 `time_stratified` + demo 索引（`min_positives≥5`）应保证 train/val/test 各有正例；若仍 nan，检查是否未重建索引或未重跑 preprocess。
-- **全量 / 需可读指标时**：检查 `label_failure_types`、`label_horizon_seconds` 与索引时间；`mcelog_max_rows`/`mcelog_scan_rows` 须一致；重建索引：**`bash scripts/build_index.sh full`**，再重跑 preprocess。
-- **全量索引正样本仍偏少**：查看 sidecar 中 `positive_candidates` 与 `ticket_sid_coverage_in_pos`。若后者极低，常见原因是工单 sid 与 mcelog 覆盖不一致，或故障时刻与 CE 事件时间轴错位。可适度增大 `positive_prefault_seconds`（近故障 hard neg）；**正样本**由 `positive_sample_interval_seconds` 在 **`[ft−H, ft]`** 决定（**ft 可晚于 mcelog 观测末尾**，此时特征窗可能为空，preprocess 仍保留 y=1）。
-- **Notebook**：`04_run_pipelines.ipynb` 中 **preflight_split_labels** 会在 train 前打印各 split 正例数；全量训练前若 val 正例为 0，应修数据或调整切分策略后再训。
+- **含义**：索引行与工单标注规则对不上，或 **train/val 某一档没有正样本**（仅在使用 `split_strategy: time` 且无分层时常见），验证集上 ROC/PR 无法定义。
+- **冒烟模式**：默认 `time_stratified` + demo 索引（`min_positives≥5`）应保证 train/val/test 各有正例；若仍 nan，检查是否未重建索引或未重新执行预处理。
+- **全量 / 需可读指标时**：检查 `label_failure_types`、`label_horizon_seconds` 与索引时间；`mcelog_max_rows`/`mcelog_scan_rows` 须一致；重建索引：**`bash scripts/build_index.sh full`**，再重新执行预处理。
+- **全量索引正样本仍偏少**：查看附属统计文件中 `positive_candidates` 与 `ticket_sid_coverage_in_pos`。若后者极低，常见原因是工单 sid 与 mcelog 覆盖不一致，或故障时刻与 CE 事件时间轴错位。可适度增大 `positive_prefault_seconds`（近故障困难负样本）；**正样本**由 `positive_sample_interval_seconds` 在 **`[ft−H, ft]`** 决定（**ft 可晚于 mcelog 观测末尾**，此时特征窗可能为空，预处理仍保留 y=1）。
+- **笔记本**：`04_run_pipelines.ipynb` 中 **preflight_split_labels** 会在 train 前打印各 split 正例数；全量训练前若 val 正例为 0，应修数据或调整切分策略后再训。
 
 ## 时间与 `predict_ts`
 
-- **相对秒**：preprocess / build_index 会将 mcelog、tickets、索引中**全局最早** raw 时间作为 `t=0`；`meta.csv` 的 `predict_ts` 为 **≥ 0 的相对秒**（不再出现 `-6e10` 量级负数）。
-- **`predict_time` 列**：展示为 `1970-01-01` 起的 ISO 时间（= 相对秒的可读形式），由 **`bash scripts/build_index.sh smoke`** 写出；sidecar **`*.csv.stats.json`** 含 `time_axis: relative_seconds_since_global_min`。
-- **遗留索引**：若仍含「公元 0001」或公历 **2000+** 字符串，preprocess 会自动减 `t₀`（依据 sidecar / 字符串规则，非纯数值阈值）；建议重建索引后清空 `data/processed`、`data/splits` 重跑。
-- **`mcelog_max_rows` / `mcelog_scan_rows`**：冒烟模式下二者须一致（默认均为 **800000**）；不一致时 preprocess 会 **报错**。仅扫描前 N 行时 `t₀` 与 sid 边界可能不完整，全量请设为 `null`。
+- **相对秒**：预处理与索引构建会将 mcelog、tickets、索引中**全局最早** raw 时间作为 `t=0`；`meta.csv` 的 `predict_ts` 为 **≥ 0 的相对秒**（不再出现 `-6e10` 量级负数）。
+- **`predict_time` 列**：展示为 `1970-01-01` 起的 ISO 时间（= 相对秒的可读形式），由 **`bash scripts/build_index.sh smoke`** 写出；附属统计文件**`*.csv.stats.json`** 含 `time_axis: relative_seconds_since_global_min`。
+- **遗留索引**：若仍含「公元 0001」或公历 **2000+** 字符串，预处理会自动减 `t₀`（依据 附属统计文件 / 字符串规则，非纯数值阈值）；建议重建索引后清空 `data/processed`、`data/splits` 后重新执行预处理。
+- **`mcelog_max_rows` / `mcelog_scan_rows`**：冒烟模式下二者须一致（默认均为 **800000**）；不一致时预处理会 **报错**。仅扫描前 N 行时 `t₀` 与 sid 边界可能不完整，全量请设为 `null`。
 - **工单 sid 无 mcelog**：索引构建会 **跳过** 无 CE 事件边界的 sid（无法定义 `t_min/t_max`）；有 mcelog 但故障晚于 `t_max` 时仍可在 `[ft−H, ft]` 生成正锚点（特征窗或为空）。
-- **勿用** `strftime('%Y-%m-%d')` 写四位年缺失的 `1-mm-dd`，会导致解析错位、`y` 全 0。
+- **不得使用** `strftime('%Y-%m-%d')` 写四位年缺失的 `1-mm-dd`，会导致解析错位、`y` 全 0。
 
 ## 索引里 `predict_time` 不是整 5 分钟（:05/:10）
 
-- **含义**：本仓库索引在**正样本 label 窗口** `[ft−H, ft]` 内按 **`positive_sample_interval_seconds`（默认 60s）** 取锚点；**近故障 / 负样本区**按 **`sample_interval_seconds=300`** 在相对时间轴上取点，**不对齐墙钟整 5 分钟**。
+- **含义**：本仓库索引在**正样本 label 窗口** `[ft−H, ft]` 内按 **`positive_sample_interval_seconds`（默认 60s）** 取锚点；**近故障 / 负样本区**按 **`sample_interval_seconds=300`** 在相对时间轴上取点，**不同步于系统时钟整 5 分钟**。
 - **是否正常**：是。标签/特征窗仍按相对秒定义：`[predict_ts−W, predict_ts)` 与 `[predict_ts, predict_ts+H]`。  
-- **详情**：见 **`docs/data_processing_guide.md` §3.5.1**。若需模拟线上 cron 整点推理，需另行在索引构建阶段做墙钟 snap（当前未实现）。
+- **详情**：见 **`docs/data_processing_guide.md` §3.5.1**。若需模拟线上 cron 整点推理，需另行在索引构建阶段做系统时钟整点同步（当前未实现）。
 
 ## Jupyter 内核缓存了已导入的 `dram2cnn` 模块
 
 - 配置校验 **只使用 `data.window_seconds`**。  
-- **处理**：对 02/03 Notebook **先运行首格**（会 `del sys.modules` 中已加载的 `dram2cnn`），或 **Kernel → Restart** 后自上而下执行；并对 Notebook **清除输出** 避免过时的 traceback 误导。
+- **处理**：对 02/03 笔记本**先运行首格**（会 `del sys.modules` 中已加载的 `dram2cnn`），或 **Kernel → Restart** 后自上而下执行；并对笔记本**清除输出** 避免过时的 traceback 误导。
 
 ## 训练 `loss=nan` / evaluate 报 `Input contains NaN` / `y_prob` 全 NaN
 
-- **因果链**：GridCNN-Deep（`configs/model.yaml`，约 590 万参数）在 **`focal_gamma>0` + 默认 `lr=0.001`** 下，常在第 2 个 optimizer step 梯度变 NaN → checkpoint 损坏 → infer 的 `y_prob` 全 NaN → evaluate 失败。
-- **数据侧通常正常**：`data/splits/X_*.npy` 无 NaN；勿误判为 preprocess 问题。
+- **因果链**：GridCNN-Deep（`configs/model.yaml`，约 320 万参数）在 **`focal_gamma>0` + 默认 `lr=0.001`** 下，常在第 2 个 optimizer step 梯度变 NaN → checkpoint 损坏 → infer 的 `y_prob` 全 NaN → evaluate 失败。
+- **数据侧通常正常**：`data/splits/X_*.npy` 无 NaN；勿误判为预处理问题。
 - **处理（全量实验）**：`exp_full_f1_ddp.yaml` / `exp_full_recall_ddp.yaml` 等已默认 `focal_gamma: 0.0`。
-- **重跑**：删除对应 marker（如 `full_f1__train.done`），再 `bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml` → infer → evaluate。
+- **重跑**：删除对应 marker（如 `full_f1__train.done`），再 `bash scripts/train_ddp.sh configs/experiments/exp_full_f1_ddp.yaml` → 推理 → 评估。
 
 ## `bash scripts/clean.sh` 后全量实验 YAML 能否加载？
 
 - **可以**：`load_experiment_config` 对 `data/raw/features_index_*_full.csv` **允许暂缺**（clean 后正常）。
-- **不能 preprocess**：`check_preprocess_raw_inputs` 会在缺索引时 前置校验，并提示 **`bash scripts/build_index.sh full`**。
+- **不能执行预处理**：`check_preprocess_raw_inputs` 会在缺索引时提前校验，并提示 **`bash scripts/build_index.sh full`**。
 - **冒烟不受影响**：`data/index_stubs/features_5m_index_demo.csv` 仍须存在（`build_index.sh smoke` 可重建）。
 
 ## 全量实验与演示索引
 
 - 凡 **无** `max_index_rows` / `mcelog_max_rows` 截断的全量 yaml，其 `index_features_path` 须指向 `data/raw/features_index_*_full.csv`。
-- 若仍指向 `index_stubs`，**preprocess / train / train_ddp.sh 会 RuntimeError**（`assert_full_scale_index_not_stub`）。
-- **全量 F1 流程**：`bash scripts/build_index.sh full` → 清空 `data/processed/*`、`data/splits/*` → `bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml`。
-- **工程向流程**（Notebook **05**）：`exp_full_recall_ddp.yaml`（`drop_empty_positive_windows: true`），与 F1 preprocess **不可混用**。
+- 若仍指向 `index_stubs`，**预处理 / 训练 / train_ddp.sh 会 RuntimeError**（`assert_full_scale_index_not_stub`）。
+- **全量 F1 流程**：`bash scripts/build_index.sh full` → 清空 `data/processed/*`、`data/splits/*`、`data/splits_sid/*` → `bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml`。
+- **工程实验流程**（笔记本 **05**）：`exp_full_recall_ddp.yaml`（`drop_empty_positive_windows: true`），与 F1 预处理输出**不可混用**。切换前核对预处理清单中 `drop_empty_positive_windows` 与 `n_samples`（validate 现已校验该字段）。
 
 ## 预处理前缺文件 / 长时间读 mcelog 后才失败
 
-- **`run_preprocess`** 与 Notebook 均会先调用 **`check_preprocess_raw_inputs`**：在扫描 mcelog 前检查 `mcelog_path`、`tickets_path`、`index_features_path`（及可选 `inventory_path`）是否为可读文件。  
+- **`run_preprocess`** 与笔记本均会先调用 **`check_preprocess_raw_inputs`**：在扫描 mcelog 前检查 `mcelog_path`、`tickets_path`、`index_features_path`（及可选 `inventory_path`）是否为可读文件。  
 - **处理**：确认路径存在；演示索引可 **`bash scripts/build_index.sh smoke`**。
 
 ## `preprocess_manifest.json` 中 `n_empty_grids` > 0
 
 - **含义**：该样本在 `[predict_ts − window_seconds, predict_ts)` 内无 mcelog 事件，对应 mcelog 通道为全零。
 - **默认行为**（`drop_empty_mcelog_windows: true`）：仅丢弃 **y=0** 的空窗行；**正样本** 空窗仍保留（manifest：`n_empty_grids_kept_positive`）。
-- **排查**：检查索引 sid 是否在 mcelog 中有覆盖、时间轴是否对齐；重建索引后清空 `data/processed`、`data/splits` 重跑 preprocess。
+- **诊断**：检查索引 sid 是否在 mcelog 中有覆盖、时间轴是否一致；重建索引后清空 `data/processed`、`data/splits` 重新执行预处理。
 
 ## 推理报错「无法解析阈值文件 best_threshold.json」
 
-- **含义**：训练目录下 `best_threshold.json` 存在但 JSON 损坏或非数值；推理**不再**静默回退 0.5。  
+- **含义**：训练目录下 `best_threshold.json` 存在但 JSON 损坏或非数值；推理**不再**在未告警时回退到 0.5。  
 - **处理**：删除损坏文件（将使用默认 0.5），或从 `best_val_metrics.json` / 验证日志恢复合理阈值后重写 JSON。
 
 ## `bash scripts/autotune.sh` 与多卡 DDP

@@ -13,13 +13,12 @@ tabular_fuse_dim: 64
 # ---------------------------------------------------------------------------
 # GridCNN-Deep backbone（参见 src/dram2cnn/models/grid_cnn.py 模块文档）
 # ---------------------------------------------------------------------------
-# 128×32 输入 → Stem → 默认 4×Stage( blocks_per_stage 个 Conv/ResBlock + MaxPool ) → GAP → MLP
+# 128×32 输入 → Stem → 默认 4×Stage( blocks_per_stage 个 ConvBNReLU + MaxPool ) → GAP → MLP
 # Optuna 可搜 3～4 stage（hpo.yaml backbone_depth）
-# 默认 blocks_per_stage=2、use_residual=true → 约 19 个 Conv2d、~5.9M 参数（C=31）
+# 默认 blocks_per_stage=2 → 约 11 个 Conv2d、~3.2M 参数（C=31）
 stem_channels: 64
 backbone_channels: [64, 128, 256, 256]
 blocks_per_stage: 2
-use_residual: true
 conv_kernel_size: 3
 use_batch_norm: true
 head_hidden: 256

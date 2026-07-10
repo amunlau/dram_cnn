@@ -10,7 +10,7 @@
 - 索引表（命名可变）：至少 **`sid`, `predict_time`**；时间列建议 **ISO 8601**（见 `docs/troubleshooting.md`「低年份」）
 - 仓库默认 **`data/index_stubs/features_5m_index_demo.csv`**（`bash scripts/build_index.sh smoke` 可重建）；全量见 `scripts/build_index.sh full`
 
-## 预处理产物（`data/processed/`）
+## 预处理输出（`data/processed/`）
 
 - **`X.npy`**：`float32`，`[N, C, H, W]`  
   - **`spatial_heatmap`（默认）**：典型 **`C=31`**, **`H=128`**, **`W=32`**（16 bank 通道 + 15 维 inventory 平铺通道，当 `inventory_as_grid_channels: true`）；或 **`C=16`** + 独立 tabular（`inventory_as_grid_channels: false`）  
@@ -20,8 +20,8 @@
 - **`meta.csv`**：`sid`, `predict_time`, `label`, `predict_ts`, **`empty_mcelog_window`**（1=特征窗内无 mcelog 事件）
 - **`meta_{train,val,test}.csv`**：切分后的 meta 子集（含 `empty_mcelog_window`）
 - **`split_manifest.json`**（在 `splits_dir/`）：`split_strategy`、各 split 样本数 / sid 数 / 空窗计数
-- **`preprocess_manifest.json`**：`grid_shape`、`schema`、`n_samples`、`pos_rate`、`drop_empty_mcelog_windows`、`n_empty_grids`（填网格时检测到的空窗数）、`n_empty_grids_dropped`（丢弃的负样本空窗数）、`n_empty_grids_kept_positive`（保留的正样本空窗数）、`index_features_path`、`window_seconds`、`label_horizon_seconds`、`time_axis`、`time_epoch_offset_absolute`、`mcelog_max_rows`、spatial 分箱与并行开关等
-- **索引 sidecar**（`*.csv.stats.json`）：与 manifest 对齐的 `time_epoch_offset_absolute`、`mcelog_scan_rows`；preprocess 会校验二者与当前配置一致
+- **`preprocess_manifest.json`**：`grid_shape`、`schema`、`n_samples`、`n_samples_before_drop`、`pos_rate`、`drop_empty_mcelog_windows`、`drop_empty_positive_windows`、`n_empty_grids`（检测到的空窗总数）、`n_empty_grids_dropped`（丢弃的**负样本**空窗数）、`n_empty_positive_dropped`（丢弃的**正样本**空窗数）、`n_empty_grids_kept_positive`（保留的正样本空窗数）、`use_compact_x`、`index_features_path`、`window_seconds`、`label_horizon_seconds`、`time_axis`、`time_epoch_offset_absolute`、`mcelog_max_rows`、spatial 分箱与并行开关等
+- **索引 sidecar**（`*.csv.stats.json`）：与 清单 一致的 `time_epoch_offset_absolute`、`mcelog_scan_rows`；预处理会校验二者与当前配置一致
 
 ## 切分（`data/splits/`）
 
@@ -33,4 +33,4 @@
 
 - **`X_*`** 形状须与 **`in_channels` × `grid_height` × `grid_width`** 一致（spatial 默认 **31×128×32**）
 - **`tabular_dim=0`** 时训练/推理仅使用 **`X`**；**`tabular_dim=15`** 时需同时提供 **`tabular_*`**
-- 修改 backbone 结构（`backbone_channels`、`blocks_per_stage` 等）**不必重跑 preprocess**，但须 **重新训练**；修改 C/H/W 则须重跑 preprocess
+- 修改 backbone 结构（`backbone_channels`、`blocks_per_stage` 等）**不必重新执行预处理**，但须 **重新训练**；修改 C/H/W 则须重新执行预处理

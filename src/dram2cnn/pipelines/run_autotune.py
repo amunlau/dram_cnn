@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""顺序执行 preprocess（含 validate）→ train → infer → evaluate。
+"""顺序执行 预处理（含校验）→ train → infer → evaluate。
 
 `preprocess_main` 结束时已内嵌 `validate_experiment`（与 `scripts/preprocess.sh` 一致）。
 
-用途：本地/regression 一键冒烟。**实验列表 `EXPS`** 请在运行前按需求修改
+用途：本地/regression 端到端链路检查。**实验列表 `EXPS`** 请在运行前按需求修改
 （默认 `exp_baseline`，已关闭 DDP 与显存 batch 探测）。若索引过期可先：`bash scripts/build_index.sh smoke`。
 """
 

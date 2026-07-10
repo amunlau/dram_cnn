@@ -3,7 +3,7 @@
 study_name: grid_cnn_hpo
 storage: null
 direction: maximize
-metric: best_f1  # 与 train.early_stop_metric 对齐；trial 内会写入该字段
+metric: best_f1  # 与 train.early_stop_metric 一致；trial 内会写入该字段
 
 n_trials: 20
 timeout_seconds: null
@@ -25,14 +25,10 @@ search_space:
       - [64, 128, 256, 256]
       - [64, 128, 256, 384]
       - [96, 192, 384, 384]
-  # 每 stage 内 Conv/ResBlock 个数；越大模型越深
+  # 每 stage 内卷积块个数；越大模型越深
   blocks_per_stage:
     type: categorical
     choices: [1, 2, 3]
-  # 是否在 stage 内使用残差块（通道对齐时）
-  use_residual:
-    type: categorical
-    choices: [true, false]
   conv_kernel_size:
     type: categorical
     choices: [3, 5]

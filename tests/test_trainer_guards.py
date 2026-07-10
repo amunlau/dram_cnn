@@ -1,4 +1,4 @@
-"""Trainer / evaluator 数值守卫回归测试。"""
+"""Trainer / evaluator 数值校验回归测试。"""
 
 import numpy as np
 import pandas as pd

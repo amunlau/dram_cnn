@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# dram2cnn — 多 GPU 训练入口（薄封装）
+# dram2cnn — 多 GPU 训练入口（轻量封装）
 #
 # 【做什么】
 #   内部调用 scripts/train.sh；后者读取 base.yaml 的 gpu/ddp（可被实验 overrides 覆盖），

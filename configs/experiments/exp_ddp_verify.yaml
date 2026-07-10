@@ -17,6 +17,8 @@ overrides:
     grid_representation: spatial_heatmap
     inventory_as_grid_channels: true
     index_features_path: data/index_stubs/features_5m_index_demo.csv
+    processed_dir: data/processed_smoke
+    splits_dir: data/splits_smoke
   train:
     epochs: 2
     patience: 99

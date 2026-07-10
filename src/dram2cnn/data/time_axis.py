@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """时间轴：将 raw CSV 中的绝对 Unix 秒统一平移为「相对秒」（全局最早时刻 = 0）。
 
-全链路（索引构建、preprocess、mcelog 事件、工单打标）须使用同一 ``time_epoch_offset``（raw 时间全局最小值）。
+全链路（索引构建、preprocess、mcelog 事件、工单标注）须使用同一 ``time_epoch_offset``（raw 时间全局最小值）。
 索引 CSV 的 ``predict_time`` 以 **1970-01-01 + 相对秒** 的 ISO 字符串存储，便于阅读且与 ``predict_ts`` 数值一致。
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# 索引/ meta 中 predict_time 的可读展示纪元（与 Unix 1970 对齐，解析后数值即相对秒）
+# 索引/ meta 中 predict_time 的可读展示纪元（与 Unix 1970 一致，解析后数值即相对秒）
 DISPLAY_EPOCH = pd.Timestamp("1970-01-01 00:00:00")
 
 TIME_AXIS_RELATIVE_MARKER = "relative_seconds_since_global_min"
@@ -73,7 +73,7 @@ def predict_time_series_looks_relative(predict_time: pd.Series, abs_ts: np.ndarr
     if (years >= 2000).any():
         return False
 
-    # build_index 产物：自 1970-01-01 起算，lo 为距全局 t₀ 的秒数（通常 < 1e8）
+    # 索引构建输出：自 1970-01-01 起算，lo 为距全局 t₀ 的秒数（通常 < 1e8）
     if int(years.min()) == 1970 and lo < 1e8:
         return True
     return False
@@ -97,7 +97,7 @@ def index_timestamps_look_relative(
 
 
 def index_file_uses_relative_display(path: Path | str, *, chunk_rows: int = 1000) -> bool:
-    """抽样索引 CSV，判断是否为本仓库 ``build_index`` 相对展示产物。"""
+    """抽样索引 CSV，判断是否为本仓库 ``build_index`` 相对展示输出。"""
     p = Path(path)
     sidecar = index_time_axis_from_sidecar(p)
     if sidecar is not None:

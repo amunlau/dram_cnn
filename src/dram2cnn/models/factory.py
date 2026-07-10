@@ -1,6 +1,6 @@
-"""模型工厂：根据 `model.arch` 构造 GridCNN-Deep。
+"""模型工厂：根据 `model.arch` 构造 GridCNN。
 
-当前仅支持 **`grid_cnn`**（见 `configs/model.yaml`）。
+当前仅支持 **`grid_cnn`**（深度由 `model.yaml` / `model_smoke.yaml` 决定）。
 `in_channels` / `grid_height` / `grid_width` 须与 preprocess 写出的 `X.npy` 及 manifest 一致。
 """
 
@@ -12,7 +12,7 @@ from .grid_cnn import GridCNN
 
 
 def build_model(model_cfg: dict) -> nn.Module:
-    """构建 GridCNN-Deep 实例。
+    """构建 GridCNN 实例。
 
     Args:
         model_cfg: 合并后的 `cfg["model"]` 字典。

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""`inventory.csv` → **固定 15 维 one-hot**（与天池 `one_hot_encoding` 类别集合对齐）。
+"""`inventory.csv` → **固定 15 维 one-hot**（与天池 `one_hot_encoding` 类别集合一致）。
 
 三组互斥类别：**DRAM 型号**（A1–C2）、**DIMM 条数档位**（8/12/16/24）、**服务器厂商**（M1–M4）。
 未知取值在该组内全 0；同一行至多每组一个为 1。"""

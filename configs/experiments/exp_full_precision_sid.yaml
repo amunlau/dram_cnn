@@ -18,6 +18,8 @@ overrides:
     drop_empty_positive_windows: true
     normalization_method: robust
     mcelog_chunk_rows: 400000
+    ram_budget_frac: 0.85
+    preprocess_workers: 1
   train:
     early_stop_metric: avg_precision
     imbalance:

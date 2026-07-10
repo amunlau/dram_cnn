@@ -18,9 +18,6 @@ search_space:
   blocks_per_stage:
     type: categorical
     choices: [2]
-  use_residual:
-    type: categorical
-    choices: [true]
   conv_kernel_size:
     type: categorical
     choices: [3]

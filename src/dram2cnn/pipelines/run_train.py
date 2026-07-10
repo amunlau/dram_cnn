@@ -5,7 +5,7 @@ from __future__ import annotations
 流程概要（rank0）：
 1. ``assert_full_scale_index_not_stub``：全量实验不得误用演示索引。
 2. ``warn_unstable_deep_focal_combo``：Deep + Focal 组合预警。
-3. ``validate_experiment``：确认 ``data/splits/`` 与 ``model`` 形状一致。
+3. ``validate_experiment``：确认实验 YAML 的 ``splits_dir`` 与 ``model`` 形状一致。
 4. 写入 ``config_snapshot.json``（供 infer 比对 checkpoint 来源）。
 5. ``log_dataset_health_for_train``：打印索引路径、样本量、正负例数等摘要。
 6. ``train_model``：训练 GridCNN，权重写入 ``checkpoints/grid_cnn.pt``。
@@ -39,7 +39,7 @@ from dram2cnn.utils.training_data_audit import log_dataset_health_for_train
 
 
 def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
-    """加载实验 YAML，校验切分，训练并落盘日志与 checkpoint。"""
+    """加载实验 YAML，校验切分，训练并写入日志与 checkpoint。"""
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -61,7 +61,9 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
     if rank == 0:
         assert_full_scale_index_not_stub(cfg, context="run_train")
         warn_unstable_deep_focal_combo(cfg, logger)
-        validate_experiment(cfg, require_splits=True)
+        report = validate_experiment(cfg, require_splits=True)
+        for w in report.get("warnings") or []:
+            logger.warning("%s", w)
         dump_json(run_dir / "config_snapshot.json", cfg)
         log_dataset_health_for_train(cfg, logger, root)
         ddp_raw = merged_scope_section(cfg, "ddp", "train").get("enabled", "auto")
@@ -117,7 +119,7 @@ def main(exp_config: str = "configs/experiments/exp_baseline.yaml"):
         logger.info("Training done. Checkpoint: %s", ckpt)
         publish_train_session_pointer(root, cfg["base"], run_dir)
         cleanup_train_session_alloc(root, cfg["base"])
-        logger.info("Run artifacts directory: %s", run_dir.resolve())
+        logger.info("运行输出目录: %s", run_dir.resolve())
 
 
 if __name__ == "__main__":

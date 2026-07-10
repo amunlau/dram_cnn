@@ -2,7 +2,7 @@
 # =============================================================================
 # dram2cnn — Optuna GridCNN 超参搜索
 #
-# 前置：已对 EXP 完成 preprocess（末尾已 validate，存在 data/splits/）。
+# 前置：已对 EXP 完成 preprocess（末尾已 validate，存在实验 YAML 的 splits_dir）。
 # 每个 trial 经 subprocess 调用 run_train，与 train.sh 共用 base.yaml 的 DDP + 80% 显存 batch 策略。
 # 用法：bash scripts/optuna.sh [实验yaml] [hpo.yaml]
 # =============================================================================

@@ -83,7 +83,7 @@ def test_preprocess_full_scale_stub_raises() -> None:
 
 
 def test_validate_horizon_config_only_with_no_require_splits(tmp_path: Path) -> None:
-    """有 processed 产物时，horizon 实验仍可做配置级 validate（不依赖仓库磁盘状态）。"""
+    """有预处理输出时，horizon 实验仍可做配置级 validate（不依赖仓库磁盘状态）。"""
     import numpy as np
 
     proc = tmp_path / "processed"

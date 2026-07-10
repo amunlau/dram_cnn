@@ -2,12 +2,12 @@ from __future__ import annotations
 
 """Optuna 驱动的 GridCNN-Deep 超参搜索。
 
-前置：已对目标实验完成 preprocess + validate（存在 `data/splits/`）。
-每个 trial 在 ``runs/optuna/<study>/trialXXXX/`` 落盘；训练经 subprocess 调用 ``run_train``（与 ``train.sh`` 相同 DDP / 显存策略）。
+前置：已对目标实验完成 preprocess + validate（存在实验 YAML 指定的 `splits_dir`）。
+每个 trial 在 ``runs/optuna/<study>/trialXXXX/`` 写入磁盘；训练经 subprocess 调用 ``run_train``（与 ``train.sh`` 相同 DDP / 显存策略）。
 
 可搜结构超参（见 ``configs/hpo/hpo.yaml``）：
 - `backbone_depth` → 写入 `model.backbone_channels`（stage 数 = 列表长度）；
-- `blocks_per_stage` / `use_residual`：控制每个 stage 内卷积块数与是否残差；
+- `blocks_per_stage`：控制每个 stage 内卷积块数；
 - `conv_kernel_size`、`head_hidden`、`dropout`：卷积核与 MLP 头；
 - `lr` / `weight_decay`：优化器。
 
@@ -121,8 +121,6 @@ def _apply_trial_params(cfg: dict[str, Any], trial_params: dict[str, Any]) -> di
     for k in ("conv_kernel_size", "head_hidden", "dropout", "blocks_per_stage"):
         if k in trial_params:
             model[k] = trial_params[k]
-    if "use_residual" in trial_params:
-        model["use_residual"] = bool(trial_params["use_residual"])
     if "lr" in trial_params:
         train["lr"] = float(trial_params["lr"])
     if "weight_decay" in trial_params:
@@ -131,7 +129,7 @@ def _apply_trial_params(cfg: dict[str, Any], trial_params: dict[str, Any]) -> di
 
 
 def _read_best_score(run_dir: Path, metric: str) -> float:
-    """从 trial 训练目录读取最优 epoch 分数；列名优先用 HPO `metric`，与 `train.early_stop_metric` 对齐。"""
+    """从 trial 训练目录读取最优 epoch 分数；列名优先用 HPO `metric`，与 `train.early_stop_metric` 保持一致。"""
     ep_path = run_dir / "epoch_metrics.csv"
     if not ep_path.is_file():
         return float("-inf")
@@ -147,10 +145,10 @@ def _read_best_score(run_dir: Path, metric: str) -> float:
 
 
 def run_study(exp_config: str, hpo_config: str) -> optuna.Study:
-    """运行 Optuna study：每个 trial 训练 GridCNN-Deep 并返回 HPO `metric` 列上的最优验证分数。
+    """运行 Optuna study：每个 trial 训练 GridCNN 并返回 HPO `metric` 列上的最优验证分数。
 
-    前置：`data/splits/` 已存在且通过 `validate_experiment`。
-    产物：`runs/optuna/<study_name>/best_trial.json` 与各 trial 的 `runs/optuna/<study_name>/trialXXXX/` 目录。
+    前置：实验 YAML 的 `splits_dir` 已存在且通过 `validate_experiment`。
+    输出：`runs/optuna/<study_name>/best_trial.json` 与各 trial 的 `runs/optuna/<study_name>/trialXXXX/` 目录。
     """
     root = project_root()
     base_cfg = load_experiment_config(exp_config)

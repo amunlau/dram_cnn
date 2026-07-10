@@ -5,7 +5,7 @@ from __future__ import annotations
 ## 目标
 
 为 preprocess 提供 **真实** 的样本锚点列表（仅 `sid`, `predict_time` 两列）；标签 **y**
-在 preprocess 阶段由 `merge_ticket_labels` 与工单表对齐后生成，与训练目标一致：
+在 preprocess 阶段由 `merge_ticket_labels` 与工单表关联后生成，与训练目标一致：
 
 **`predict_ts <= failed_ts <= predict_ts + label_horizon_seconds`**（默认 horizon = 5 分钟）。
 
@@ -13,10 +13,10 @@ from __future__ import annotations
 
 1. **时间步长**：`sample_interval_seconds` 固定间隔生成锚点（默认 300s）。
 2. **正样本区**：每个工单失败时刻前 **label 窗口** `[ft − H, ft]` 内按
-   `positive_sample_interval_seconds`（默认 60s）密集采样；打标后 **保留 y=1**。
+   `positive_sample_interval_seconds`（默认 60s）密集采样；标注后 **保留 y=1**。
    （旧实现曾在整个 prefault 窗用统一步长采样，H=300s、步长 300s 时每个故障仅 ~1 个正锚点。）
 3. **近故障区**：`[ft − positive_prefault_seconds, ft − H)` 内按 `sample_interval_seconds`
-   采样，打标为 **y=0**；在 uniform/random 负采样**不足目标数量时**补入负类池（hard negative）。
+   采样，标注为 **y=0**；在 uniform/random 负采样**不足目标数量时**补入负类池（困难负样本）。
 4. **负样本平衡**：按 `target_positive_ratio` 控制正负比例；`uniform` 在网格上均匀取点，
    `random` 随机拒绝采样（冒烟 preset 默认）。
 5. **sid 覆盖**：负采样 **优先** 全部工单 sid，再覆盖 mcelog 中其余 sid。
@@ -76,7 +76,7 @@ def _attach_predict_ts(df: pd.DataFrame) -> pd.DataFrame:
     """为索引 DataFrame 解析 `predict_time` 并附加 `predict_ts`（相对秒）。
 
     仅用于 ``build_index`` 内部：此时 ``predict_time`` 已由 ``relative_seconds_to_predict_time_str`` 写出，
-    解析后数值即为相对秒（与 ``load_index_table`` 对 build_index 产物的行为一致）。
+    解析后数值即为相对秒（与 ``load_index_table`` 对 索引构建输出的行为一致）。
     """
     out = df.copy()
     out["sid"] = out["sid"].astype(str)
@@ -98,7 +98,7 @@ def _label_index_rows(
     time_epoch_offset: float,
     by_sid_fail: dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
-    """对索引行调用 `merge_ticket_labels`，无需经临时 CSV 落盘。"""
+    """对索引行调用 `merge_ticket_labels`，无需经临时 CSV 写入磁盘。"""
     if df.empty:
         return np.array([], dtype=np.int64)
     idx = _attach_predict_ts(df)
@@ -157,9 +157,9 @@ class IndexBuildConfig:
     Attributes:
         mcelog_path / tickets_path: 原始 CSV 路径。
         sample_interval_seconds: 锚点采样步长（秒）。
-        label_horizon_seconds: 打标 horizon（秒），须与 preprocess 配置一致。
+        label_horizon_seconds: 标注 horizon（秒），须与 preprocess 配置一致。
         window_seconds: 特征窗长度（秒）；锚点下界为 `t_min + window_seconds`。
-        positive_prefault_seconds: 近故障 hard-neg 区起点 = `ft − prefetch`（秒）。
+        positive_prefault_seconds: 近故障困难负样本区起点 = `ft − prefetch`（秒）。
         positive_sample_interval_seconds: 正样本 label 窗口 `[ft−H, ft]` 内采样步长（秒）。
         failure_types: 计入工单的 `failure_type` 列表（同 `label_failure_types`）。
         target_positive_ratio: 输出索引目标正例占比（约 0.05–0.95）。
@@ -280,7 +280,7 @@ class IndexBuildConfig:
 
 
 def _require_readable_csv(path: Path, label: str, required_cols: tuple[str, ...]) -> None:
-    """预检 CSV 路径可读且含必需列，避免全表扫描后才因 ParserError/缺列失败。"""
+    """预先检查 CSV 路径可读且含必需列，避免全表扫描后才因 ParserError/缺列失败。"""
     if not path.is_file():
         raise FileNotFoundError(f"{label} 不存在: {path}")
     try:
@@ -381,9 +381,9 @@ def _positive_candidates(
     - **正样本区** ``[ft − horizon, ft]``：步长 ``positive_sample_interval_seconds``；
       上界为工单失败时刻 **ft**（可超出 mcelog ``t_max``；特征窗或为空，标签仍来自 tickets）。
     - **近故障区** ``[ft − prefetch, ft − horizon)``：步长 ``sample_interval_seconds``；
-      打标后为 y=0，供 hard negative 补齐。
+      标注后为 y=0，供困难负样本补齐。
 
-    候选尚未打标；后续 `_label_split_candidates` 会区分 y=1 / y=0。
+    候选尚未标注；后续 `_label_split_candidates` 会区分 y=1 / y=0。
     """
     pos_step = float(cfg.positive_sample_interval_seconds)
     near_step = float(cfg.sample_interval_seconds)
@@ -398,7 +398,7 @@ def _positive_candidates(
             continue
         for ft in fail_arr:
             ft = float(ft)
-            # 正样本区上界取工单失败时刻 ft（勿 clamp 到 vb[1]）：故障可晚于 mcelog 观测末尾，
+            # 正样本区上界取工单失败时刻 ft（勿将上界截断（clamp） 到 vb[1]）：故障可晚于 mcelog 观测末尾，
             # 此时特征窗可能为空但标签仍来自 tickets（preprocess 保留 y=1 空窗）。
             pos_start = max(ft - horizon, vb[0])
             pos_end = ft
@@ -472,7 +472,7 @@ def _negative_candidates_random(
     n_neg_target: int,
     sids: list[str],
 ) -> pd.DataFrame:
-    """随机选择 (sid, predict_ts) 负样本，对齐到采样网格并拒绝正类区间内的点。"""
+    """随机选择 (sid, predict_ts) 负样本，映射到采样网格并拒绝正类区间内的点。"""
     interval = float(cfg.sample_interval_seconds) * int(cfg.neg_stride_multiplier)
     horizon = float(cfg.label_horizon_seconds)
     win = float(cfg.window_seconds)
@@ -592,7 +592,7 @@ def _label_split_candidates(
     time_epoch_offset: float,
     by_sid_fail: dict[str, np.ndarray] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """对 prefault 候选打标，拆成真阳性、近故障阴性、全量候选三份 DataFrame。"""
+    """对 prefault 候选标注，拆成真阳性、近故障阴性、全量候选三份 DataFrame。"""
     y_all = _label_index_rows(pos_df, cfg, time_epoch_offset, by_sid_fail=by_sid_fail)
     ticket_df = pos_df.reset_index(drop=True)
     pos_out = ticket_df.loc[y_all == 1, ["sid", "predict_time"]].reset_index(drop=True)
@@ -625,7 +625,7 @@ def _truncate_to_max_rows(
 def build_index_dataframe(cfg: IndexBuildConfig) -> tuple[pd.DataFrame, dict[str, Any]]:
     """构建索引 DataFrame 与统计 dict（不写磁盘）。
 
-    流程：扫描 mcelog 时间界 → 加载工单 → prefault 正候选 → 打标 → 负采样 → 合并 shuffle。
+    流程：扫描 mcelog 时间界 → 加载工单 → prefault 正候选 → 标注 → 负采样 → 合并 shuffle。
     """
     _require_readable_csv(cfg.mcelog_path, "mcelog", ("sid", "error_time"))
     _require_readable_csv(cfg.tickets_path, "tickets", ("sid", "failure_type", "failed_time"))
@@ -726,7 +726,7 @@ def validate_and_write_index(
     *,
     time_epoch_offset: float | None = None,
 ) -> dict[str, Any]:
-    """原子写入索引 CSV，并用 `merge_ticket_labels` 校验正负样本数是否达标。"""
+    """安全写入索引 CSV（先写临时文件再替换），并用 `merge_ticket_labels` 校验正负样本数是否达标。"""
     if time_epoch_offset is None:
         time_epoch_offset = compute_global_time_epoch_offset(
             cfg.mcelog_path,
@@ -780,7 +780,7 @@ def build_index_to_csv(
     out_path: Path,
     write_stats_json: bool = True,
 ) -> dict[str, Any]:
-    """一站式入口：构建索引 → 校验 → 写入 CSV（可选 `.stats.json`  sidecar）。"""
+    """统一入口：构建索引 → 校验 → 写入 CSV（可选 `.stats.json`  sidecar）。"""
     df, build_stats = build_index_dataframe(cfg)
     write_meta = validate_and_write_index(
         df,

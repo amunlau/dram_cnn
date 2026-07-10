@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# 清理中间产物、训练/推理输出、缓存与 Notebook 检查点（保留 data/raw 原始 CSV 与 index_stubs）
+# 清理中间结果、训练/推理输出、缓存与笔记本检查点（保留 data/raw 原始 CSV 与 index_stubs）
 #
 # 用法：
-#   bash scripts/clean.sh              # 默认：runs、processed、splits、outputs、缓存（保留 raw 全量索引）
+#   bash scripts/clean.sh              # 默认：runs、processed*/splits*、outputs、缓存（保留 raw 全量索引）
 #   bash scripts/clean.sh --notebooks  # 额外清除 notebooks/*.ipynb 单元格输出
 #   bash scripts/clean.sh --purge-indexes  # 额外删除 data/raw/features_index_*_full.csv
 set -euo pipefail
@@ -51,7 +51,7 @@ if [[ "${PURGE_INDEXES}" -eq 1 ]]; then
   find data/raw -maxdepth 1 -type f \( -name 'features_index_*_full.csv' -o -name 'features_index_*_full.csv.stats.json' \) -delete 2>/dev/null || true
 fi
 
-echo "=== 清理 outputs/ 生成物（保留 .gitkeep）==="
+echo "=== 清理 outputs/ 下的生成文件（保留 .gitkeep）==="
 find outputs/figures outputs/tables outputs/reports outputs/notebooks -mindepth 1 \
   ! -name '.gitkeep' -delete 2>/dev/null || true
 
@@ -86,4 +86,4 @@ fi
 
 echo "Done. 重建冒烟: bash scripts/build_index.sh smoke && bash scripts/preprocess.sh configs/experiments/exp_baseline.yaml"
 echo "全量 F1: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_f1_ddp.yaml"
-echo "工程向: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml  # 见 notebooks/05"
+echo "工程实验: bash scripts/build_index.sh full && bash scripts/preprocess.sh configs/experiments/exp_full_recall_ddp.yaml  # 见 notebooks/05"

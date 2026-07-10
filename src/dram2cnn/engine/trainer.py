@@ -184,13 +184,13 @@ def train_model(
     logger=None,
     rng_seed: int = 42,
 ) -> Path:
-    """训练 GridCNN-Deep 并写入 checkpoint。
+    """训练 GridCNN 并写入 checkpoint。
 
     Args:
         model_cfg: `cfg["model"]`。
         train_cfg: `cfg["train"]`（epochs、lr、imbalance、early_stop_metric 等）。
         splits_dir: 含 `X_train.npy` 等切分张量的目录。
-        run_dir: 本次 run 产物目录；权重写入 `checkpoints/grid_cnn.pt`。
+        run_dir: 本次 run 输出目录；权重写入 `checkpoints/grid_cnn.pt`。
         device: `auto` / `cpu` / `cuda`。
         logger: rank0 可选日志器。
         rng_seed: DataLoader / 过采样随机种子。
@@ -314,11 +314,11 @@ def train_model(
 
     model = build_model(model_cfg).to(dev)
     if _is_main_process() and logger is not None:
-        # 便于对比 trial / 配置：记录 backbone 深度与参数量（GridCNN-Deep）
+        # 便于对比 trial / 配置：记录 backbone 深度与参数量
         base_model = model.module if isinstance(model, DDP) else model
         if hasattr(base_model, "count_conv_layers"):
             logger.info(
-                "Model GridCNN-Deep: conv_layers=%d params=%d",
+                "Model GridCNN: conv_layers=%d params=%d",
                 base_model.count_conv_layers(),
                 base_model.count_parameters(),
             )
@@ -362,12 +362,6 @@ def train_model(
             early_stop_metric,
             patience,
         )
-        n_va_ds = len(val_ds)
-        if n_va_ds < 32:
-            logger.warning(
-                "验证集 DataLoader 样本数 N_val=%d 较小：roc_auc/pr_ap 易呈阶梯状或长期不变。",
-                n_va_ds,
-            )
     best_score, bad_epochs = float("-inf"), 0
     epoch_rows = []
 
@@ -397,7 +391,7 @@ def train_model(
             if not math.isfinite(loss_val):
                 raise RuntimeError(
                     f"Training loss is non-finite (loss={loss_val}) at epoch {ep} batch {batch_count + 1}. "
-                    "GridCNN-Deep 在 focal_gamma>0 且默认 lr 下易数值发散；请将 train.imbalance.focal_gamma 设为 0 "
+                    "GridCNN 在 focal_gamma>0 且默认 lr 下易数值发散；请将 train.imbalance.focal_gamma 设为 0 "
                     "或降低 train.lr 后重训。"
                 )
             if max_grad_norm is not None and float(max_grad_norm) > 0:
@@ -470,21 +464,43 @@ def train_model(
                 if logger is not None:
                     auc_log = float("nan") if roc_auc_val is None else float(roc_auc_val)
                     ap_log = float("nan") if ap_val is None else float(ap_val)
-                    logger.info(
-                        "Epoch %d/%d | loss=%.6f | roc_auc=%.6f | pr_ap=%.6f | f1@0.5=%.6f | best_f1=%.6f | best_t=%.4f | "
-                        "%s=%.6f | sec=%.2f",
-                        ep,
-                        epochs,
-                        avg_train_loss,
-                        auc_log,
-                        ap_log,
-                        float(m_at_05["f1"]),
-                        float(m_best["f1"]),
-                        float(best_t["threshold"]),
-                        early_stop_metric,
-                        float(stop_score),
-                        epoch_seconds,
-                    )
+                    # 主行已含 roc_auc / pr_ap / f1@0.5 / best_f1；仅当早停指标不在其中时再追加，避免重复。
+                    _already_logged = {
+                        "best_f1",
+                        "roc_auc",
+                        "avg_precision",
+                        "f1_at_0p5",
+                    }
+                    if early_stop_metric in _already_logged:
+                        logger.info(
+                            "Epoch %d/%d | loss=%.6f | roc_auc=%.6f | pr_ap=%.6f | f1@0.5=%.6f | best_f1=%.6f | "
+                            "best_t=%.4f | sec=%.2f",
+                            ep,
+                            epochs,
+                            avg_train_loss,
+                            auc_log,
+                            ap_log,
+                            float(m_at_05["f1"]),
+                            float(m_best["f1"]),
+                            float(best_t["threshold"]),
+                            epoch_seconds,
+                        )
+                    else:
+                        logger.info(
+                            "Epoch %d/%d | loss=%.6f | roc_auc=%.6f | pr_ap=%.6f | f1@0.5=%.6f | best_f1=%.6f | "
+                            "best_t=%.4f | %s=%.6f | sec=%.2f",
+                            ep,
+                            epochs,
+                            avg_train_loss,
+                            auc_log,
+                            ap_log,
+                            float(m_at_05["f1"]),
+                            float(m_best["f1"]),
+                            float(best_t["threshold"]),
+                            early_stop_metric,
+                            float(stop_score),
+                            epoch_seconds,
+                        )
                     if t_kw.get("objective") != "f1":
                         logger.info(
                             "  threshold_objective=%s val_recall=%.4f val_precision=%.4f @t=%.4f",
@@ -522,7 +538,7 @@ def train_model(
                         if logger is not None:
                             logger.info(
                                 "Early stop at epoch %d: metric=%s 已连续 %d 轮无提升（patience=%d）；"
-                                "当前 best_%s=%.6f。",
+                                "当前最优 %s=%.6f。",
                                 ep,
                                 early_stop_metric,
                                 bad_epochs,
@@ -573,7 +589,7 @@ def train_model(
         if state_dict_has_non_finite(state_dict):
             raise RuntimeError(
                 "Training ended without a valid checkpoint: final weights contain NaN/Inf. "
-                "See train log for non-finite loss/grad; common fix: focal_gamma=0 for GridCNN-Deep."
+                "See train log for non-finite loss/grad; common fix: focal_gamma=0 for GridCNN."
             )
         torch.save(state_dict, ckpt)
         if logger is not None:

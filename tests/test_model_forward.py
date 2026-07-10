@@ -73,7 +73,6 @@ def test_grid_cnn_default_spatial_shape():
         "stem_channels": 64,
         "backbone_channels": [64, 128, 256, 256],
         "blocks_per_stage": 2,
-        "use_residual": True,
         "head_hidden": 256,
         "dropout": 0.25,
         "tabular_dim": 0,

@@ -18,6 +18,8 @@ overrides:
     drop_empty_positive_windows: true
     normalization_method: robust
     mcelog_chunk_rows: 400000
+    ram_budget_frac: 0.85
+    preprocess_workers: 1
   train:
     early_stop_metric: avg_precision
     imbalance:
@@ -27,6 +29,7 @@ overrides:
       focal_gamma: 0.0
     threshold_profile: recall_guard
     threshold_search:
-      min_precision: 0.50
+      # 与时间切分实验 exp_full_recall_ddp 保持一致（模板默认 0.50，此处覆盖为 0.55）
+      min_precision: 0.55
     num_workers: 2
     prefetch_factor: 2

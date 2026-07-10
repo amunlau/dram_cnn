@@ -98,9 +98,9 @@ def validate_config(cfg: Dict[str, Any], *, require_full_index: bool = False) ->
     """在返回合并配置前做强校验；失败抛异常，避免训练中途才发现路径或维度错误。
 
     与 Notebook 里 `check_preprocess_raw_inputs` 分工不同：此处要求 model/infer 等完整字段存在且合法。
-    `run_preprocess` 在加载完整配置前会先调用 `check_preprocess_raw_inputs` 做原始文件预检。
+    `run_preprocess` 在加载完整配置前会先调用 `check_preprocess_raw_inputs` 做原始文件预先检查。
 
-    ``require_full_index=True`` 时强制 ``index_features_path`` 已落盘（用于 preprocess 前二次校验）。
+    ``require_full_index=True`` 时强制 ``index_features_path`` 已写入磁盘（用于 preprocess 前二次校验）。
     默认对 ``data/raw/features_index_*_full.csv`` 允许暂缺，便于 clean 后直接加载全量实验 YAML。
     """
     data_cfg = cfg.get("data", {})

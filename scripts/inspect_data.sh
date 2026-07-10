@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# dram2cnn — 快速查看预处理产物概览（仅诊断用）
+# dram2cnn — 快速查看预处理输出概览（仅诊断用）
 #
 # 【怎么用】
 #   bash scripts/inspect_data.sh
@@ -62,7 +62,7 @@ y_csv = p / "y.csv"
 missing = [str(fp) for fp in [x_npy, y_npy, meta_csv] if not fp.exists()]
 if missing:
     raise FileNotFoundError(
-        "缺少预处理产物，请先执行 `bash scripts/preprocess.sh <实验yaml>`:\n" + "\n".join(missing)
+        "缺少预处理输出，请先执行 `bash scripts/preprocess.sh <实验yaml>`:\n" + "\n".join(missing)
     )
 
 X = np.load(x_npy, mmap_mode="r")
@@ -75,6 +75,11 @@ print("=== 数据概览（processed，原始特征尺度）===")
 print("提示：训练/验证/测试实际使用 splits/X_*.npy（切分后按训练集 mean/std 归一化）。此处为预处理全量池。")
 print(f"X shape: {tuple(X.shape)}")
 print(f"y shape: {tuple(y.shape)}")
+meta = pd.read_csv(meta_csv)
+if int(X.shape[0]) != total or len(meta) != total:
+    raise SystemExit(
+        f"N mismatch: X_N={X.shape[0]}, y_N={total}, meta_rows={len(meta)}；请重新执行预处理。"
+    )
 print(f"样本总数: {total}")
 print(f"正样本: {pos} ({pos / total:.6f})")
 print(f"负样本: {neg} ({neg / total:.6f})")
@@ -84,7 +89,6 @@ if y_csv.exists():
     ydf = pd.read_csv(y_csv)
     print(f"y.csv: {y_csv} (rows={len(ydf)})")
 
-meta = pd.read_csv(meta_csv)
 print("\n=== meta 前3行 ===")
 mcols = [c for c in ("sid", "predict_time", "label") if c in meta.columns]
 print(meta[mcols].head(3).to_string(index=False))
@@ -104,11 +108,15 @@ if man_p.is_file():
         "window_seconds",
         "label_horizon_seconds",
         "n_samples",
+        "n_samples_before_drop",
         "pos_rate",
         "n_empty_grids",
         "n_empty_grids_dropped",
+        "n_empty_positive_dropped",
         "n_empty_grids_kept_positive",
         "drop_empty_mcelog_windows",
+        "drop_empty_positive_windows",
+        "use_compact_x",
     ):
         if k in man:
             print(f"  {k}: {man[k]}")

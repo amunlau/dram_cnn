@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""实验语义守卫：索引 stub、checkpoint 与配置一致性、evaluate/infer 产物对齐等。"""
+"""实验语义校验：索引 stub、checkpoint 与配置一致性、evaluate/推理输出一致等。"""
 
 import json
 import warnings
@@ -22,7 +22,6 @@ _CHECKPOINT_MODEL_KEYS = (
     "stem_channels",
     "backbone_channels",
     "blocks_per_stage",
-    "use_residual",
     "head_hidden",
     "dropout",
 )
@@ -37,7 +36,7 @@ def is_stub_index_path(path: str | Path) -> bool:
 
 
 def is_deep_grid_cnn(model_cfg: dict[str, Any]) -> bool:
-    """Heuristic：与 configs/model.yaml（GridCNN-Deep）对齐的深度 backbone。"""
+    """启发式：与 configs/model.yaml（GridCNN-Deep）一致的深度 backbone。"""
     return (
         int(model_cfg.get("blocks_per_stage", 1)) >= 2
         and int(model_cfg.get("stem_channels", 32)) >= 64
@@ -82,7 +81,7 @@ def assert_full_scale_index_not_stub(cfg: dict[str, Any], *, context: str = "tra
         f"[{context}] 全量实验仍使用演示索引: {idx}\n"
         "请先 bash scripts/build_index.sh full，并在实验 YAML 设置\n"
         "  index_features_path: data/raw/features_index_h300s_step300s_full.csv\n"
-        "然后清空 data/processed、data/splits 并重跑 preprocess。"
+        "然后清空 data/processed、data/splits 并重新执行预处理。"
     )
 
 
@@ -98,7 +97,7 @@ def assert_predictions_match_experiment(
         if pred_p.is_file():
             raise ValueError(
                 f"{pred_p} 存在但缺少 predictions_manifest.json；"
-                "请对当前实验重跑 infer，避免误用旧 predictions 做 evaluate。"
+                "请对当前实验重新执行推理，避免误用旧 predictions 做 evaluate。"
             )
         return
     man = json.loads(man_p.read_text(encoding="utf-8"))
@@ -111,7 +110,7 @@ def assert_predictions_match_experiment(
     if Path(str(man_splits)).resolve() != cfg_splits.resolve():
         raise ValueError(
             f"predictions 来自 splits_dir={man_splits}，与当前实验 {cfg_splits} 不一致；"
-            "请对当前实验重跑 infer，或切换为生成该 predictions 的实验 YAML。"
+            "请对当前实验重新执行推理，或切换为生成该 predictions 的实验 YAML。"
         )
 
 
@@ -159,7 +158,7 @@ def assert_checkpoint_matches_experiment(
 ) -> None:
     """infer 前比对训练目录 ``config_snapshot.json`` 与当前实验 ``model`` 段是否一致。
 
-    缺 snapshot 时仅 WARNING（兼容旧 run）；存在 snapshot 且 model 键不一致则 前置校验。
+    缺 snapshot 时仅 WARNING（兼容旧 run）；存在 snapshot 且 model 键不一致则抛出校验错误。
     """
     base = root or repo_root()
     ckpt_dir = ckpt_dir if ckpt_dir.is_absolute() else (base / ckpt_dir).resolve()
@@ -193,7 +192,7 @@ def assert_checkpoint_matches_experiment(
 
 
 def splits_match_processed(cfg: dict[str, Any], root: Path | None = None) -> bool:
-    """splits 文件齐全、manifest 与 cfg 对齐，且切分行数等于 processed 样本数。"""
+    """splits 文件齐全、manifest 与 cfg 一致，且切分行数等于 processed 样本数。"""
     import numpy as np
 
     base = root or repo_root()

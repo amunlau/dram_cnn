@@ -8,7 +8,7 @@ inventory_path: data/raw/inventory.csv
 # ---------------------------------------------------------------------------
 # 相对秒：t₀ = min(mcelog.error_time, tickets.failed_time[, 遗留 index])；predict_ts = t_abs − t₀
 # 特征窗（半开）：[predict_ts − window_seconds, predict_ts) — 仅用锚点之前的 mcelog
-# 标签窗（闭）：  [predict_ts, predict_ts + label_horizon_seconds] — 对齐 tickets.failed_time
+# 标签窗（闭）：  [predict_ts, predict_ts + label_horizon_seconds] — 对应 tickets.failed_time
 # 合法锚点（每 sid）：t_min + window_seconds ≤ predict_ts ≤ t_max − label_horizon_seconds
 # 存储：predict_time = 1970-01-01 + predict_ts 的 ISO 字符串；sidecar 含 time_axis / W / H
 window_seconds: 300
@@ -25,7 +25,7 @@ label_failure_types: [1, 2, 3]
 # 默认演示表由 bash scripts/build_index.sh smoke 生成（写入 features_5m_index_demo.csv）。
 # 全量 / 不同预测窗：python3 -m dram2cnn.pipelines.run_build_index --mode full --label-horizon-seconds 1800 ...
 # 生成后在本文件或实验 yaml 的 overrides.data.index_features_path 指向对应 CSV，
-# 并删除 data/processed、data/splits 后重跑 preprocess。
+# 并删除 data/processed、data/splits 后重新执行预处理。
 index_features_path: data/index_stubs/features_5m_index_demo.csv
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ index_build:
   sample_interval_seconds: 300
   # 正样本 label 窗口 [ft−H, ft] 内步长（秒）；H=300 时 60s → 每故障约 5 个正锚点（旧版统一步长 300s 时仅 ~1 个）
   positive_sample_interval_seconds: 60
-  # 近故障 hard-neg 区：从 ft−prefault 到 ft−H；全量 preset 覆盖为 24h
+  # 近故障困难负样本区：从 ft−prefault 到 ft−H；全量 preset 覆盖为 24h
   positive_prefault_seconds: 3600
   # 仅 CLI 直调 build_index.py 且无 preset 时生效；build_index.sh 始终走 preset（smoke=0.08, full=0.15）
   target_positive_ratio: 0.25
