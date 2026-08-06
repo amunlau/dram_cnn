@@ -14,6 +14,8 @@ Jupyter 工作流与命令行 **`scripts/*.sh`** 共用同一套配置（`config
 
 默认配置：**`spatial_heatmap`** + **5 分钟 horizon** + **`X` [N,31,128,32]**。
 
+可选压缩实验（命令行，非笔记本）：W8A8 PTQ、三种粒度剪枝、先剪枝后量化，见 `docs/user_guide.md` §9 与 `reports/algorithm_scripts_index.md` §5。
+
 ---
 
 ## 04 — 冒烟 / 全量 F1 最大化

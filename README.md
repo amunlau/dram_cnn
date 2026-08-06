@@ -84,6 +84,10 @@ flowchart LR
 | `scripts/train.sh` | 训练（自动 DDP + 80% 显存 batch） |
 | `scripts/infer.sh` | 推理（同上） |
 | `scripts/evaluate.sh` | 测试集指标与图表 |
+| `scripts/quantize.sh` | W8A8 PTQ（BN Fold + AdaRound；导出 packed INT8） |
+| `scripts/infer_int8.sh` | 加载 packed INT8 做参考推理（写出 `predictions.csv`） |
+| `scripts/prune.sh` | 三种粒度剪枝对比；主指标为 val 重搜 τ → 全量 test |
+| `scripts/prune_quantize.sh` | 先剪枝后 W8A8 量化（总对比大表；含固定 τ 对照） |
 | `scripts/train_ddp.sh` | 全量多卡训练入口（调用 `train.sh`） |
 | `scripts/optuna.sh` | GridCNN-Deep 超参搜索（Optuna，trial 内 DDP） |
 | `scripts/autotune.sh` | 预处理 → 训练 → 推理 → 评估 端到端链路检查 |
@@ -130,7 +134,21 @@ bash scripts/autotune.sh
 
 # 5. 多卡 DDP 回归（需 ≥2 GPU）
 bash scripts/verify_ddp.sh
+
+# 6. （可选）W8A8 PTQ → packed INT8 参考推理
+#    需已有全量训练会话与 best_threshold.json；评估用实验 YAML 的 time_stratified splits
+# bash scripts/quantize.sh configs/experiments/exp_full_f1_ddp.yaml
+# bash scripts/infer_int8.sh configs/experiments/exp_full_f1_ddp.yaml
+
+# 7. （可选）三种粒度剪枝对比（默认短时微调 5 epoch；主指标=各模型 val 重搜 τ → test）
+# bash scripts/prune.sh configs/experiments/exp_full_f1_ddp.yaml
+
+# 8. （可选）先剪枝后 W8A8 量化（需先完成 prune.sh；仅支持先剪枝后量化）
+#    主表含 F1/P/R/模型大小；固定基线 τ 对照列见 summary（量化后固定高 τ 可能出现 P=1.0）
+# bash scripts/prune_quantize.sh configs/experiments/exp_full_f1_ddp.yaml
 ```
+
+专题报告：`reports/GridCNN-Deep_W8A8量化报告.md`、`reports/GridCNN剪枝对比实验报告.md`、`reports/GridCNN先剪枝后量化对比报告.md`。
 
 **Horizon 对比示例**（索引与实验 YAML 须一致）：
 
@@ -152,7 +170,8 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 | `docs/data_processing_guide.md` | 数据处理与索引设计 |
 | `docs/tianchi_pipeline.md` | 规格速查 |
 | `docs/project_configuration_reference.md` | 配置长篇说明 |
-| `docs/troubleshooting.md` | 排错 |
+| `docs/troubleshooting.md` | 排错（含量化 / 剪枝 / 先剪枝后量化） |
+| `reports/GridCNN先剪枝后量化说明.md` | 剪枝→量化评估口径与复现 |
 
 演示索引重建：**`bash scripts/build_index.sh smoke`**
 

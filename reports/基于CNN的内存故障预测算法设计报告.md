@@ -371,8 +371,12 @@ CE 故障在地址平面上表现为局部热点与跨区域扩展。将事件�
 | `pipelines/run_train.py` | 训练并写阈值文件 |
 | `pipelines/run_infer.py` | 加载权重推理 |
 | `pipelines/run_evaluate.py` | 写出 `metrics.json` |
+| `pipelines/run_quantize.py` | W8A8 PTQ（BN Fold + AdaRound；导出 packed INT8） |
+| `pipelines/run_infer_int8.py` | 加载 packed INT8 参考推理 |
+| `pipelines/run_prune.py` | 三种粒度剪枝对比（主指标=val 重搜 τ） |
+| `pipelines/run_prune_quantize.py` | 先剪枝后 W8A8 量化总对比 |
 
-对应脚本：`build_index.sh`、`preprocess.sh`、`validate.sh`、`train.sh` / `train_ddp.sh`、`infer.sh`、`evaluate.sh`、`resplit.sh`。统一 `export PYTHONPATH=src`。笔记本 04/05 与命令行共用实验 YAML；全量训练单元默认受 `DRAM2CNN_RUN_FULL_NOTEBOOKS=1` 开关保护。
+对应脚本：`build_index.sh`、`preprocess.sh`、`validate.sh`、`train.sh` / `train_ddp.sh`、`infer.sh`、`evaluate.sh`、`resplit.sh`，以及可选压缩实验 `quantize.sh`、`infer_int8.sh`、`prune.sh`、`prune_quantize.sh`（详见 §8.4 与 `reports/algorithm_scripts_index.md`）。统一 `export PYTHONPATH=src`。笔记本 04/05 与命令行共用实验 YAML；全量训练单元默认受 `DRAM2CNN_RUN_FULL_NOTEBOOKS=1` 开关保护。
 
 ### 6.2 训练流程与早停
 
@@ -524,9 +528,14 @@ Horizon 探索实验使用独立索引与 `processed_horizon_*` 目录，不改�
 |------|-------------|
 | 全量 F1 主实验 | **已完成**（F1=0.764） |
 | 服务器划分泛化 | **已完成**（F1=0.709） |
+| W8A8 PTQ / packed INT8 | **已提供**（`quantize.sh` / `infer_int8.sh`；专题见 `reports/GridCNN-Deep_W8A8量化报告.md`） |
+| 三种粒度剪枝对比 | **已提供**（`prune.sh`；主指标=val 重搜 τ；见 `reports/GridCNN剪枝对比*.md`） |
+| 先剪枝后量化 | **已提供**（`prune_quantize.sh`；仅此顺序；见 `reports/GridCNN先剪枝后量化*.md`） |
 | 实验跟踪 | 当前以 `runs/` 文件为准；可扩展 MLflow / W&B |
 | 在线服务 | 当前批推理；可扩展定时批推理或服务化 |
 | 模型更新 | 新模型与旧模型并行对比部署阶段 F1 后切换，保留上一版权重与阈值 |
+
+剪枝与「先剪枝后量化」对比表的主指标与训练一致（各模型验证集重搜阈值后再评测试集）；单独 W8A8 专题报告历史数字多为固定基线部署 τ，二者勿混读。固定高 τ 下量化模型可能出现 Precision=1.0（FP=0），属阈值错配对照，详见 `docs/troubleshooting.md` 与先剪枝后量化说明。
 
 ---
 

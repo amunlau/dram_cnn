@@ -5,8 +5,11 @@ FROM nvcr.io/nvidia/pytorch:26.03-py3
 # 系统级配置（对root和非root用户都生效）
 COPY pip.conf /etc/pip.conf
 COPY requirements.txt /root/workspace/requirements.txt
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     && rm -rf /var/lib/apt/lists/* && apt-get install git
-RUN pip install --no-cache-dir --upgrade pip &&     pip install --no-cache-dir -r /root/workspace/requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential git \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /root/workspace/requirements.txt
 
 # ==================== 2. 在这里安装需要的包 ====================
 # 推荐写法：一次 RUN 安装多个包，节省镜像层数

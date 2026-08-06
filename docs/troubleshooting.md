@@ -18,6 +18,27 @@
 - **现象**：`predictions 来自 splits_dir=... 与当前实验 ... 不一致`。  
 - **处理**：对当前实验 YAML 重跑 **`bash scripts/infer.sh ...`** 后再 **`bash scripts/evaluate.sh ...`**，或切换为生成该 predictions 的实验配置。
 
+## 量化 / INT8 推理
+
+- **前置**：对应实验已有训练会话（`checkpoints/grid_cnn.pt` + `best_threshold.json`）。  
+- **数据**：使用实验 YAML 的 `splits_dir`（全量 F1 主实验为 `data/splits`，`time_stratified`）。  
+- **PTQ**：`bash scripts/quantize.sh configs/experiments/exp_full_f1_ddp.yaml`；产物在 `<train_dir>/quant_w8a8_<ts>/`，指针 `.latest_quant_session`。  
+- **INT8 参考推理**：`bash scripts/infer_int8.sh ...`（读 packed 模型）；产物在 `runs/<run_name>/infer_int8_<ts>/`。  
+- **阈值**：默认沿用训练 `best_threshold.json`（基线部署 τ）；若仅看固定 τ 下 P 异常升高，属 PR 权衡，见量化报告 §6。  
+- **`tabular_dim>0`**：当前 W8A8 / INT8 路径不支持，请使用 inventory 拼入网格通道（`tabular_dim=0`）。  
+- **时延**：`infer_int8` 与报告中的 latency 为参考实现墙钟时间，**不能**当作 TensorRT/cuDNN INT8 加速结论。  
+- **与 evaluate**：`infer_int8` 写出的 `predictions.csv` 列格式与 FP32 infer 兼容；若要用 `evaluate.sh`，需将 `base.evaluate_run_id` / 指针指到该 `infer_int8_*` 会话，或直接看 `metrics_int8.json`。
+
+## 剪枝对比 / 先剪枝后量化
+
+- **入口**：`bash scripts/prune.sh configs/experiments/exp_full_f1_ddp.yaml`。  
+- **产物**：`<train_dir>/prune_compare_<ts>/`（`prune.log`、`summary.md`、各方法子目录）；指针 `.latest_prune_session`。  
+- **评估口径（重要）**：主指标 = 各模型在 **val** 上按训练同款 `threshold_search(objective=f1)` 重搜阈值（valτ），再评 **全量 time-stratified test**。勿与「一律用基线 τ=0.84」混读。  
+- **结构化 F1 崩塌**：`--finetune-epochs 0` 时 BN/Filter 通道剪枝常接近 0；请使用默认微调或显式 `--finetune-epochs 5`。  
+- **BN 重要性**：全量训练未对 γ 加 L1；`bn_channel` 仅用现成 `|γ|`。  
+- **先剪枝后量化**：`bash scripts/prune_quantize.sh ...`（读 `.latest_prune_session`）；产物 `prune_then_quant_*`，指针 `.latest_prune_quant_session`。**不考虑**先量化后剪枝。  
+- **Precision=1.0**：若看「固定基线 τ」对照列，量化后模型更保守时 FP 可为 0 → P=1.0、R 下降；**主表 valτ 指标不会以此作为验收**。详见 `reports/GridCNN先剪枝后量化说明.md`。
+
 ## `X_train.npy` 与 model 的 C/H/W 不一致
 
 重新执行 `bash scripts/preprocess.sh <实验 yaml>`，并确认 `configs/model.yaml` 的 `grid_height/grid_width/in_channels` 与 `preprocess_manifest.json` 一致。

@@ -365,6 +365,10 @@ bash scripts/optuna.sh \
 | `train_ddp.sh [exp]` | 多卡训练入口（调用 train.sh） | `exp_full_f1_ddp.yaml` |
 | `infer.sh [exp]` | 单卡或自动 DDP 推理 + 显存 batch 探测 | `exp_baseline.yaml` |
 | `evaluate.sh [exp]` | 指标与图表 | `exp_baseline.yaml` |
+| `quantize.sh [exp] [--train-dir …]` | W8A8 PTQ（BN Fold + AdaRound；写 `quant_w8a8_*`） | `exp_full_f1_ddp.yaml` |
+| `infer_int8.sh [exp] [--pack …]` | packed INT8 参考推理（写 `infer_int8_*`） | `exp_full_f1_ddp.yaml` |
+| `prune.sh [exp] [--sparsities …]` | 三种粒度剪枝对比（写 `prune_compare_*`） | `exp_full_f1_ddp.yaml` |
+| `prune_quantize.sh [exp] [--prune-dir …]` | 先剪枝后 W8A8 量化（写 `prune_then_quant_*`） | `exp_full_f1_ddp.yaml` |
 | `optuna.sh [exp] [hpo]` | 超参搜索 | `exp_optuna_smoke.yaml` |
 | `autotune.sh` | 端到端链路检查全流程 | 见 `src/dram2cnn/pipelines/run_autotune.py` 的 `EXPS` |
 | `clean.sh [--notebooks] [--purge-indexes]` | 清理 runs、processed/splits、outputs、缓存；`--notebooks` 清除笔记本输出；`--purge-indexes` 才删 raw 全量索引 | — |
@@ -383,11 +387,73 @@ python3 -m dram2cnn.pipelines.run_validate   configs/experiments/exp_baseline.ya
 python3 -m dram2cnn.pipelines.run_train      configs/experiments/exp_baseline.yaml
 python3 -m dram2cnn.pipelines.run_infer      configs/experiments/exp_baseline.yaml
 python3 -m dram2cnn.pipelines.run_evaluate   configs/experiments/exp_baseline.yaml
+python3 -m dram2cnn.pipelines.run_quantize   configs/experiments/exp_full_f1_ddp.yaml
+python3 -m dram2cnn.pipelines.run_infer_int8 configs/experiments/exp_full_f1_ddp.yaml
+python3 -m dram2cnn.pipelines.run_prune      configs/experiments/exp_full_f1_ddp.yaml
+python3 -m dram2cnn.pipelines.run_prune_quantize configs/experiments/exp_full_f1_ddp.yaml
 python3 -m dram2cnn.pipelines.run_autotune   # 端到端链路检查：预处理（含校验）→ 训练 → 推理 → 评估
 python3 -m dram2cnn.pipelines.run_optuna     configs/experiments/exp_optuna_smoke.yaml configs/hpo/hpo.yaml
 python3 -m dram2cnn.utils.deployment_kpi   # 合并 outputs/tables/*_deployment_kpi.csv
 # inspect_data.sh 为 shell + 内嵌 Python，无独立 -m 模块
 ```
+
+### 9.1 W8A8 量化与 INT8 参考推理（可选）
+
+在**已完成训练**的会话上做 Post-Training Quantization（无 QAT），并可用打包后的 INT8 权重做参考推理：
+
+```bash
+# 默认读 runs/<run_name>/.latest_train_session
+bash scripts/quantize.sh configs/experiments/exp_full_f1_ddp.yaml
+# 产物：<train_dir>/quant_w8a8_<ts>/grid_cnn_w8a8_packed.pt、quantization_report.*
+
+# 默认读 .latest_quant_session 中的 packed 模型
+bash scripts/infer_int8.sh configs/experiments/exp_full_f1_ddp.yaml
+# 产物：runs/<run_name>/infer_int8_<ts>/predictions.csv、metrics_int8.json
+```
+
+| 概念 | 说明 |
+|------|------|
+| fake-quant | PTQ 过程中的仿真精度（报告字段 `w8a8_test_deployment`） |
+| packed INT8 | 权重以 **int8** 驻留 + 激活量化的参考前向（`infer_int8` / `w8a8_int8_packed_test_deployment`） |
+| 保护层 | 默认 **stem** 与 **head.3** 保持 FP32；`quantize.sh --no-protect` 可关闭 |
+| 时延 | 参考实现墙钟时间**不可**与 TensorRT/cuDNN INT8 内核对比 |
+| 限制 | 当前要求 `model.tabular_dim=0`（inventory 拼入网格通道） |
+
+专题报告见 [`reports/GridCNN-Deep_W8A8量化报告.md`](../reports/GridCNN-Deep_W8A8量化报告.md)。
+
+### 9.2 三种粒度剪枝对比（可选）
+
+对已训练 GridCNN-Deep 分别做非结构化 / BN 通道 / Filter 结构化剪枝，并在多个比例下评估：
+
+```bash
+bash scripts/prune.sh configs/experiments/exp_full_f1_ddp.yaml \
+  --sparsities 0.3,0.5,0.7 \
+  --finetune-epochs 5
+# 产物：<train_dir>/prune_compare_<ts>/{prune.log,summary.md,summary.json,<method>/sparsity_XX/}
+```
+
+| 方法 | 模块 | 要点 |
+|------|------|------|
+| `unstructured` | `engine/prune/unstructured.py` | 全局 L1 magnitude；`torch.nn.utils.prune`；不改形状 |
+| `bn_channel` | `engine/prune/bn_channel.py` | 按 BN `|γ|` 逐层剪通道；切片衔接后续层与 `head.0` |
+| `filter` | `engine/prune/filter_prune.py` | 按 filter 权重 L1-norm 剪输出通道；衔接同 bn_channel |
+
+**评估口径**：使用实验 YAML 的 **time_stratified 全量** `splits_dir`；主指标为各模型在 **val** 上重搜 F1 最优阈值（valτ）后再评 **test**（与训练 `threshold_search` 一致）。`metrics_val_retuned.json` / CSV 的 `*_at_deploy_tau` 保留基线部署 τ 对照。
+
+**注意**：全量训练未对 γ 做 L1；结构化剪枝默认保护 stem/末层卷积，并建议短时微调（默认 5 epoch）。纯剪枝对比可加 `--finetune-epochs 0`。专题见 [`reports/GridCNN剪枝对比实验报告.md`](../reports/GridCNN剪枝对比实验报告.md) 与 [`GridCNN剪枝对比说明.md`](../reports/GridCNN剪枝对比说明.md)。
+
+### 9.3 先剪枝后量化（可选）
+
+在已有 `prune_compare_*` 产物上，对每个剪枝模型再做 W8A8 PTQ（packed INT8），并生成含 F1/P/R/模型大小等的完整对比表。**仅支持先剪枝后量化**。
+
+评估口径与训练一致：使用实验 YAML 的 **time_stratified 全量** `splits_dir`；主指标为各模型在 **val** 上重搜 F1 最优阈值后再评 **test**。若误用基线固定部署 τ（如 0.84）评估量化模型，可能出现 Precision=1.0（高阈值下 FP=0），表中另附「固定τ」对照列说明该现象。
+
+```bash
+bash scripts/prune_quantize.sh configs/experiments/exp_full_f1_ddp.yaml
+# 产物：<train_dir>/prune_then_quant_<ts>/{summary.md,comparison_table.csv,prune_quantize.log,...}
+```
+
+归档报告：[`reports/GridCNN先剪枝后量化对比报告.md`](../reports/GridCNN先剪枝后量化对比报告.md)。
 
 ---
 

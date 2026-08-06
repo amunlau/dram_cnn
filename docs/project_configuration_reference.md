@@ -84,9 +84,11 @@
 
 核心函数为 `dram2cnn.utils.config.load_experiment_config(exp_path)`。典型调用方包括：
 
-- `dram2cnn.pipelines.run_preprocess`  
-- `dram2cnn.pipelines.run_train`  
-- `dram2cnn.pipelines.run_infer`  
+- `dram2cnn.pipelines.run_preprocess`
+- `dram2cnn.pipelines.run_train`
+- `dram2cnn.pipelines.run_infer`
+- `dram2cnn.pipelines.run_quantize` / `run_infer_int8`（可选 W8A8 PTQ 与 packed INT8 参考推理）
+- `dram2cnn.pipelines.run_prune` / `run_prune_quantize`（可选三种粒度剪枝对比、先剪枝后量化）
 - 以及 `validate`、`evaluate` 等配套流水线。
 
 **情况**：任何入口若传入的实验 yaml 路径错误，会在**最早阶段**失败，避免「预处理跑了半小时才发现 train 里 device 写错」。
@@ -611,6 +613,17 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 ### 17.2 `.latest_train_session` 与 `.latest_infer_session`
 
 二者为 `runs/<run_name>/` 下的**单行文本文件**，内容为相对子目录名。设计目的是：后续 `infer` 默认找到「最近一次成功训练」的权重子目录，而无需手工拷贝路径。若你并行跑多次训练，务必确认 infer 读到的指针是否指向你**意图**的那次；必要时使用 `base.checkpoint_run_id` 或 `evaluate_run_id` 固定。
+
+量化 / 剪枝相关指针（写在**训练会话目录**或 run 根下）：
+
+| 指针 | 位置 | 用途 |
+|------|------|------|
+| `.latest_quant_session` | `<train_dir>/` | `quantize.sh` 写入；`infer_int8.sh` 默认查找 packed 模型 |
+| `.latest_infer_int8_session` | `runs/<run_name>/` | `infer_int8.sh` 写入最近一次 INT8 推理目录 |
+| `.latest_prune_session` | `<train_dir>/` | `prune.sh` 写入最近一次剪枝对比目录 |
+| `.latest_prune_quant_session` | `<train_dir>/` | `prune_quantize.sh` 写入最近一次「先剪枝后量化」目录 |
+
+剪枝 / 先剪枝后量化的**主评价指标**与训练一致：在验证集上 `threshold_search`（默认 `objective=f1`）得到各模型自己的阈值，再在测试集上报告 F1/P/R。汇总表另保留「固定基线部署 τ」对照列；量化后若该对照列出现 Precision=1.0，表示高阈值下 FP=0，属阈值错配对照，不是主验收口径。详见 `docs/user_guide.md` §9.2–9.3 与 `reports/GridCNN先剪枝后量化说明.md`。
 
 ### 17.3 `run_id` / `infer_run_id` 的论文级用途
 
