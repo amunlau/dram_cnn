@@ -1,0 +1,31 @@
+{
+  "input_quant": {
+    "note": "X_*_int8.npy 由单精度输入按 q=clip(round(x/scale+zero_point),0,255) 得到 uint8；形状仍为「样本×通道×高×宽」。stem 已 INT8，输入激活按本参数量化后进入主干首层。",
+    "scale": 0.03590577046076457,
+    "zero_point": 28,
+    "from_layer": "stem",
+    "stem_keep_fp32": false,
+    "first_quant_conv": "stem"
+  },
+  "model_format": "gridcnn_w8a8_packed_v2",
+  "force_zero_bias": true,
+  "protect_stem": false,
+  "protect_head_out": false,
+  "all_layers_int8": true,
+  "deploy_threshold": 0.64,
+  "input_shape": [
+    31,
+    128,
+    32
+  ],
+  "dtype_fp32": "float32",
+  "dtype_int8_act": "uint8",
+  "说明": {
+    "模型格式": "gridcnn_w8a8_packed_v2",
+    "强制无偏置": true,
+    "整网全INT8": true,
+    "保护主干首层": false,
+    "保护分类末层": false,
+    "部署阈值": 0.64
+  }
+}

@@ -92,7 +92,8 @@ class GridCNN(nn.Module):
     - `in_channels`, `grid_height`, `grid_width`：须与 预处理输出 `X.npy` 一致；
     - `stem_channels`, `backbone_channels`, `blocks_per_stage`：backbone 深度与宽度；
     - `tabular_dim`：>0 时从 `tabular.npy` 读入向量并在 GAP 后拼接（独立 tabular 融合）；
-    - `head_hidden`, `dropout`：分类 MLP 容量与正则。
+    - `head_hidden`, `dropout`：分类 MLP 容量与正则；
+    - `head_bias`：分类头（及 tabular 投影）Linear 是否含 bias（默认 true；硬件无偏置交付可 false）。
     """
 
     def __init__(self, model_cfg: dict):
@@ -108,12 +109,15 @@ class GridCNN(nn.Module):
         fuse_h = int(model_cfg.get("tabular_fuse_dim", 64))
         kernel = int(model_cfg.get("conv_kernel_size", 3))
         use_bn = bool(model_cfg.get("use_batch_norm", True))
+        # 分类头 Linear 是否含 bias；硬件无偏置交付时可设 false（默认 true 保持兼容）
+        head_bias = bool(model_cfg.get("head_bias", True))
         if kernel not in (3, 5):
             raise ValueError(f"conv_kernel_size must be 3 or 5, got {kernel}")
         if not channels:
             raise ValueError("backbone_channels must be non-empty")
 
         # Stem：将原始 bank+inventory 通道映射到统一特征宽度
+        # 注意：use_bn=True 时 Conv 本身已无 bias（见 _ConvBNReLU）
         self.stem = _ConvBNReLU(in_ch, stem_width, kernel, use_bn)
         stages: list[nn.Module] = []
         c = stem_width
@@ -135,9 +139,10 @@ class GridCNN(nn.Module):
         self.out_channels = c
 
         self.tab_dim = tab_dim
+        self.head_bias = head_bias
         if tab_dim > 0:
             self.tab_proj = nn.Sequential(
-                nn.Linear(tab_dim, fuse_h),
+                nn.Linear(tab_dim, fuse_h, bias=head_bias),
                 nn.ReLU(inplace=True),
                 nn.Dropout(drop),
             )
@@ -146,10 +151,10 @@ class GridCNN(nn.Module):
             self.tab_proj = None
             head_in = c
         self.head = nn.Sequential(
-            nn.Linear(head_in, head_h),
+            nn.Linear(head_in, head_h, bias=head_bias),
             nn.ReLU(inplace=True),
             nn.Dropout(drop),
-            nn.Linear(head_h, num_classes),
+            nn.Linear(head_h, num_classes, bias=head_bias),
         )
 
     def forward(self, x: torch.Tensor, tab: torch.Tensor | None = None) -> torch.Tensor:

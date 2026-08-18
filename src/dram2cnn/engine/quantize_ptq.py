@@ -69,7 +69,12 @@ class FoldedConvReLU(nn.Module):
         return self.relu(self.conv(x))
 
 
-def _fuse_conv_bn(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
+def _fuse_conv_bn(
+    conv: nn.Conv2d,
+    bn: nn.BatchNorm2d,
+    *,
+    force_zero_bias: bool = False,
+) -> nn.Conv2d:
     if bn.running_mean is None or bn.running_var is None:
         raise RuntimeError("BatchNorm2d 缺少 running_mean/running_var，无法折叠")
     w = conv.weight.detach().clone()
@@ -86,6 +91,7 @@ def _fuse_conv_bn(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
     std = torch.sqrt(var + eps)
     w_fold = w * (gamma / std).reshape(-1, 1, 1, 1)
     b_fold = beta + (b - mean) * (gamma / std)
+    # force_zero_bias：硬件无偏置交付——丢弃 fold 偏置，只保留缩放后的权重
     fused = nn.Conv2d(
         conv.in_channels,
         conv.out_channels,
@@ -94,18 +100,21 @@ def _fuse_conv_bn(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
         padding=conv.padding,
         dilation=conv.dilation,
         groups=conv.groups,
-        bias=True,
+        bias=not force_zero_bias,
         padding_mode=conv.padding_mode,
     )
     fused.weight.data.copy_(w_fold)
-    fused.bias.data.copy_(b_fold)
+    if not force_zero_bias:
+        fused.bias.data.copy_(b_fold)
     return fused
 
 
-def fold_batchnorm(model: GridCNN) -> GridCNN:
-    """原地将所有 ``_ConvBNReLU`` 折叠为 ``FoldedConvReLU``。
+def fold_batchnorm(model: GridCNN, *, force_zero_bias: bool = False) -> GridCNN:
+    """原地将所有 ``_ConvBNReLU`` 折叠为 ``FoldedConvReLU``（Conv+BN+ReLU 融合）。
 
-    若 ``use_batch_norm=false``（``bn`` 为 ``Identity``），仅包装原 Conv（已含 bias）。
+    若 ``use_batch_norm=false``（``bn`` 为 ``Identity``），仅包装原 Conv。
+    ``force_zero_bias=True``：融合后 Conv 不含 bias（丢弃 BN 折合偏置）；
+    同时将分类头 Linear 的 bias 置零并移除（``bias=None`` 语义：重建无 bias Linear）。
     """
     model.eval()
 
@@ -113,14 +122,28 @@ def fold_batchnorm(model: GridCNN) -> GridCNN:
         for name, child in list(module.named_children()):
             if isinstance(child, _ConvBNReLU):
                 if isinstance(child.bn, nn.BatchNorm2d):
-                    fused = _fuse_conv_bn(child.conv, child.bn)
+                    fused = _fuse_conv_bn(child.conv, child.bn, force_zero_bias=force_zero_bias)
                 elif isinstance(child.bn, nn.Identity):
                     conv = child.conv
-                    if conv.bias is None:
-                        raise RuntimeError(
-                            f"{name}: use_batch_norm=false 时期望 Conv 含 bias，实际 bias=None"
+                    if force_zero_bias:
+                        fused = nn.Conv2d(
+                            conv.in_channels,
+                            conv.out_channels,
+                            kernel_size=conv.kernel_size,
+                            stride=conv.stride,
+                            padding=conv.padding,
+                            dilation=conv.dilation,
+                            groups=conv.groups,
+                            bias=False,
+                            padding_mode=conv.padding_mode,
                         )
-                    fused = conv
+                        fused.weight.data.copy_(conv.weight.detach())
+                    else:
+                        if conv.bias is None:
+                            raise RuntimeError(
+                                f"{name}: use_batch_norm=false 时期望 Conv 含 bias，实际 bias=None"
+                            )
+                        fused = conv
                 else:
                     raise TypeError(f"{name}: 不支持的 bn 类型 {type(child.bn)}")
                 setattr(module, name, FoldedConvReLU(fused))
@@ -128,7 +151,30 @@ def fold_batchnorm(model: GridCNN) -> GridCNN:
                 _replace(child)
 
     _replace(model)
+
+    if force_zero_bias:
+        _strip_linear_biases(model)
+
     return model
+
+
+def _strip_linear_biases(model: nn.Module) -> None:
+    """将所有 Linear 重建为 bias=False（丢弃原 bias 数值）。"""
+    for module in model.modules():
+        for name, child in list(module.named_children()):
+            if isinstance(child, nn.Linear) and child.bias is not None:
+                new = nn.Linear(child.in_features, child.out_features, bias=False)
+                new.weight.data.copy_(child.weight.detach())
+                setattr(module, name, new)
+
+
+def assert_no_biases(model: nn.Module) -> list[str]:
+    """检查 Conv2d/Linear 均无 bias；返回仍含 bias 的参数名（空列表=通过）。"""
+    bad: list[str] = []
+    for name, mod in model.named_modules():
+        if isinstance(mod, (nn.Conv2d, nn.Linear)) and mod.bias is not None:
+            bad.append(f"{name}.bias")
+    return bad
 
 
 # ---------------------------------------------------------------------------
@@ -658,11 +704,16 @@ def run_w8a8_ptq(
     log: LogFn | None = None,
     fp32_model: GridCNN | None = None,
     channel_masks: dict | None = None,
+    force_zero_bias: bool = False,
+    skip_fold: bool = False,
 ) -> dict[str, Any]:
     """执行完整 W8A8 PTQ，导出 fake-quant 与 packed INT8，并做 INT8 参考推理校验。
 
     可从 ``ckpt`` 加载，或直接传入 ``fp32_model``（先剪枝后量化）。
     结构化剪枝请传 ``channel_masks``，以便 packed INT8 可重建拓扑。
+
+    ``force_zero_bias``：BN fold 后丢弃偏置（硬件无 bias 交付）。
+    ``skip_fold``：传入模型已是 FoldedConvReLU 拓扑时跳过 fold（仍可再 strip bias）。
     """
     import copy
 
@@ -725,7 +776,34 @@ def run_w8a8_ptq(
 
     # BN fold（深拷贝，避免破坏传入的剪枝模型）
     folded = copy.deepcopy(fp32).cpu()
-    fold_batchnorm(folded)
+    if skip_fold:
+        _log("skip_fold=True：假定输入已是 FoldedConvReLU 拓扑")
+        if force_zero_bias:
+            # 若 fold 时仍带 bias，强制剥除
+            for mod in folded.modules():
+                if isinstance(mod, FoldedConvReLU) and mod.conv.bias is not None:
+                    c = mod.conv
+                    nb = nn.Conv2d(
+                        c.in_channels,
+                        c.out_channels,
+                        kernel_size=c.kernel_size,
+                        stride=c.stride,
+                        padding=c.padding,
+                        dilation=c.dilation,
+                        groups=c.groups,
+                        bias=False,
+                        padding_mode=c.padding_mode,
+                    )
+                    nb.weight.data.copy_(c.weight.detach())
+                    mod.conv = nb
+            _strip_linear_biases(folded)
+    else:
+        fold_batchnorm(folded, force_zero_bias=force_zero_bias)
+    if force_zero_bias:
+        bad = assert_no_biases(folded)
+        if bad:
+            raise RuntimeError(f"force_zero_bias 后仍存在 bias: {bad[:8]}")
+        _log("force_zero_bias=True：已确认 Conv/Linear 均无 bias")
     folded.to(device).eval()
     y_f, p_f = predict_probs(folded, test_loader, device)
     folded_metrics = eval_at_threshold(y_f, p_f, threshold)
@@ -850,6 +928,8 @@ def run_w8a8_ptq(
         "weight_quant": "per-channel symmetric int8",
         "activation_quant": "per-tensor asymmetric int8",
         "bn_folding": True,
+        "force_zero_bias": bool(force_zero_bias),
+        "skip_fold": bool(skip_fold),
         "qat": False,
         "device": str(device),
         "gpu_note": "PTQ AdaRound 为单卡逐层优化；不使用 DDP 多卡属正常。",

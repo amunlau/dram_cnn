@@ -1,0 +1,52 @@
+{
+  "fp32_nobias_deployment": {
+    "threshold": 0.76,
+    "threshold_source": "验证集 best_threshold.json（推理评估使用；作为部署口径主指标汇报）",
+    "metrics": {
+      "accuracy": 0.8788332086761406,
+      "f1": 0.7672413793103449,
+      "precision": 0.826625386996904,
+      "recall": 0.7158176943699732,
+      "roc_auc": 0.8968304678896021,
+      "avg_precision": 0.8562951102367293
+    }
+  },
+  "int8_after_fuse_prune_all_layers": {
+    "accuracy": 0.8846297681376215,
+    "f1": 0.742164646886753,
+    "precision": 0.9855715871254163,
+    "recall": 0.5951742627345844,
+    "roc_auc": 0.8493153839842925,
+    "avg_precision": 0.8076786107000045,
+    "threshold": 0.64,
+    "confusion": {
+      "tp": 888,
+      "fp": 13,
+      "fn": 604,
+      "tn": 3843
+    }
+  },
+  "pipeline_stages": {
+    "fp32_train": {
+      "f1_deploy": 0.7672413793103449,
+      "f1_valtau": 0.7672413793103449
+    },
+    "fused_nobias": {
+      "f1_deploy": 0.2654647186820019,
+      "f1_valtau": 0.4385655496766608
+    },
+    "fused_pruned": {
+      "f1_deploy": 0.6998327759197325,
+      "f1_valtau": 0.7519818799546999
+    },
+    "w8a8_all_int8": {
+      "f1_deploy": null,
+      "f1_valtau": 0.742164646886753
+    }
+  },
+  "说明": {
+    "fp32_nobias_deployment": "无偏置单精度训练权重在测试集上的部署口径指标",
+    "int8_after_fuse_prune_all_layers": "融合无偏置 → 剪枝 → 整网 W8A8 后交付模型在测试集上的指标",
+    "pipeline_stages": "各阶段 F1 对照（deploy=固定训练阈值；valtau=验证集重新搜索阈值后）"
+  }
+}

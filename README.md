@@ -88,6 +88,7 @@ flowchart LR
 | `scripts/infer_int8.sh` | 加载 packed INT8 做参考推理（写出 `predictions.csv`） |
 | `scripts/prune.sh` | 三种粒度剪枝对比；主指标为 val 重搜 τ → 全量 test |
 | `scripts/prune_quantize.sh` | 先剪枝后 W8A8 量化（总对比大表；含固定 τ 对照） |
+| `scripts/fuse_prune_quantize.sh` | 融合 Conv+BN+ReLU（可强制无偏置）→ 非结构化剪枝 → W8A8（交付常用一体入口） |
 | `scripts/train_ddp.sh` | 全量多卡训练入口（调用 `train.sh`） |
 | `scripts/optuna.sh` | GridCNN-Deep 超参搜索（Optuna，trial 内 DDP） |
 | `scripts/autotune.sh` | 预处理 → 训练 → 推理 → 评估 端到端链路检查 |
@@ -146,6 +147,10 @@ bash scripts/verify_ddp.sh
 # 8. （可选）先剪枝后 W8A8 量化（需先完成 prune.sh；仅支持先剪枝后量化）
 #    主表含 F1/P/R/模型大小；固定基线 τ 对照列见 summary（量化后固定高 τ 可能出现 P=1.0）
 # bash scripts/prune_quantize.sh configs/experiments/exp_full_f1_ddp.yaml
+
+# 9. （可选）融合→剪枝→量化一体流程（无偏置 / 全 INT8 交付常用）
+# bash scripts/fuse_prune_quantize.sh configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml
+
 ```
 
 专题报告：`reports/GridCNN-Deep_W8A8量化报告.md`、`reports/GridCNN剪枝对比实验报告.md`、`reports/GridCNN先剪枝后量化对比报告.md`。
@@ -171,6 +176,9 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 | `docs/tianchi_pipeline.md` | 规格速查 |
 | `docs/project_configuration_reference.md` | 配置长篇说明 |
 | `docs/troubleshooting.md` | 排错（含量化 / 剪枝 / 先剪枝后量化） |
+| `docs/dataset_processing_specification.md` | 算法向数据处理规范（锚点交叠、空窗、算例） |
+| `delivery/` | 无偏置 + 整网 INT8 交付包（模型/数据/证据/ONNX；见其中 README） |
+| `new-delivery/` | 在线推理与数据处理技术说明（锚点/热图/空窗/加权/台账；不含量化细节） |
 | `reports/GridCNN先剪枝后量化说明.md` | 剪枝→量化评估口径与复现 |
 
 演示索引重建：**`bash scripts/build_index.sh smoke`**

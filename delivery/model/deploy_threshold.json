@@ -1,0 +1,6 @@
+{
+  "threshold": 0.64,
+  "objective": "f1",
+  "source": "val_retuned_after_fuse_prune",
+  "说明": "部署决策阈值；在剪枝微调后于验证集上按 F1 重新搜索得到，用于测试集固定评价。"
+}

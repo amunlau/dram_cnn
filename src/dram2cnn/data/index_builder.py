@@ -22,6 +22,9 @@ from __future__ import annotations
 5. **sid 覆盖**：负采样 **优先** 全部工单 sid，再覆盖 mcelog 中其余 sid。
 6. **有效锚点区间**：负样本 / 近故障区锚点 clamp 在 **`t_min + W ≤ predict_ts ≤ t_max − H`**。
    **正样本区**在 **`[ft−H, ft]`** 采样（**ft 可 > t_max**）；右删截 **不**限制工单驱动正锚点。
+7. **交叠处理**：全局负采样跳过 `_is_positive_at`（会 y=1 的点），并用 `exclude` 去掉已生成的
+   工单驱动候选精确锚点；**不**挖空近故障整段时间窗（网格错位时全局点仍可能落在近故障时段内）。
+   负样本不足时从近故障 y=0 补齐。详见 `docs/data_processing_guide.md` §3.5.2。
 
 索引粒度为 **sid**（与 trouble_tickets 一致）；mcelog 的 memoryid 等列仅用于后续特征构造。
 """
@@ -159,7 +162,7 @@ class IndexBuildConfig:
         sample_interval_seconds: 锚点采样步长（秒）。
         label_horizon_seconds: 标注 horizon（秒），须与 preprocess 配置一致。
         window_seconds: 特征窗长度（秒）；锚点下界为 `t_min + window_seconds`。
-        positive_prefault_seconds: 近故障困难负样本区起点 = `ft − prefetch`（秒）。
+        positive_prefault_seconds: 近故障困难负样本区起点 = `ft − positive_prefault_seconds`（秒）。
         positive_sample_interval_seconds: 正样本 label 窗口 `[ft−H, ft]` 内采样步长（秒）。
         failure_types: 计入工单的 `failure_type` 列表（同 `label_failure_types`）。
         target_positive_ratio: 输出索引目标正例占比（约 0.05–0.95）。
@@ -380,14 +383,14 @@ def _positive_candidates(
 
     - **正样本区** ``[ft − horizon, ft]``：步长 ``positive_sample_interval_seconds``；
       上界为工单失败时刻 **ft**（可超出 mcelog ``t_max``；特征窗或为空，标签仍来自 tickets）。
-    - **近故障区** ``[ft − prefetch, ft − horizon)``：步长 ``sample_interval_seconds``；
+    - **近故障区** ``[ft − prefault, ft − horizon)``：步长 ``sample_interval_seconds``；
       标注后为 y=0，供困难负样本补齐。
 
     候选尚未标注；后续 `_label_split_candidates` 会区分 y=1 / y=0。
     """
     pos_step = float(cfg.positive_sample_interval_seconds)
     near_step = float(cfg.sample_interval_seconds)
-    prefetch = float(cfg.positive_prefault_seconds)
+    prefault = float(cfg.positive_prefault_seconds)
     win = float(cfg.window_seconds)
     horizon = float(cfg.label_horizon_seconds)
     rows: list[dict[str, str]] = []
@@ -411,8 +414,8 @@ def _positive_candidates(
                         }
                     )
 
-            if prefetch > horizon:
-                near_start = max(ft - prefetch, vb[0])
+            if prefault > horizon:
+                near_start = max(ft - prefault, vb[0])
                 # 半开上界 ft−H：锚点 ft−H 在正样本闭区间 [ft−H, ft] 内打 y=1，不应落入 near_neg
                 near_end = min(ft - horizon - 1e-6, vb[1])
                 if near_end >= near_start:

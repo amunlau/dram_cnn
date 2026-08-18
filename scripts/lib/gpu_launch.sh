@@ -35,8 +35,23 @@ gpu_launch_run() {
   echo "[${MODE}.sh] launch_plan using_all_visible_gpus=${using_all_visible_gpus} (1=yes,0=no)"
 
   if [[ "$device" == cuda* ]] && [[ "$ddp_enabled" == "1" ]] && [[ "$nproc_per_node" -gt 1 ]]; then
-    echo "[${MODE}.sh] DDP: torchrun --nproc_per_node=${nproc_per_node} -m ${PY_MODULE} ${EXP_CONFIG}"
-    torchrun --standalone --nproc_per_node="${nproc_per_node}" -m "${PY_MODULE}" "${EXP_CONFIG}"
+    # 容器内 hostname 常无法解析 IPv6，导致 c10d 长时间卡住、GPU 无负载。
+    # 强制走本机 IPv4 rendezvous，并尽量补全 /etc/hosts 中的 hostname 映射。
+    export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
+    export MASTER_PORT="${MASTER_PORT:-29500}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+    _hn="$(hostname 2>/dev/null || true)"
+    if [[ -n "${_hn}" ]] && [[ -w /etc/hosts ]]; then
+      grep -qE "^127\\.0\\.0\\.1[[:space:]].*${_hn}([[:space:]]|$)" /etc/hosts || echo "127.0.0.1 ${_hn}" >> /etc/hosts || true
+      grep -qE "^::1[[:space:]].*${_hn}([[:space:]]|$)" /etc/hosts || echo "::1 ${_hn}" >> /etc/hosts || true
+    fi
+    echo "[${MODE}.sh] DDP: torchrun --nnodes=1 --nproc_per_node=${nproc_per_node} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} -m ${PY_MODULE} ${EXP_CONFIG}"
+    torchrun \
+      --nnodes=1 \
+      --nproc_per_node="${nproc_per_node}" \
+      --rdzv_backend=c10d \
+      --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
+      -m "${PY_MODULE}" "${EXP_CONFIG}"
   else
     echo "[${MODE}.sh] single process: python3 -m ${PY_MODULE} ${EXP_CONFIG}"
     python3 -m "${PY_MODULE}" "${EXP_CONFIG}"

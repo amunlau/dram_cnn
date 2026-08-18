@@ -34,7 +34,7 @@ index_features_path: data/index_stubs/features_5m_index_demo.csv
 # ---------------------------------------------------------------------------
 index_build:
   sample_interval_seconds: 300
-  # 正样本 label 窗口 [ft−H, ft] 内步长（秒）；H=300 时 60s → 每故障约 5 个正锚点（旧版统一步长 300s 时仅 ~1 个）
+  # 正样本 label 窗口 [ft−H, ft] 内步长（秒）；H=300 时 60s → 每故障约 6 个正锚点（闭区间含 ft；旧版统一步长 300s 时仅 ~1 个）
   positive_sample_interval_seconds: 60
   # 近故障困难负样本区：从 ft−prefault 到 ft−H；全量 preset 覆盖为 24h
   positive_prefault_seconds: 3600

@@ -128,7 +128,7 @@ flowchart TB
 | 固定步长采样 | 负样本 / 近故障区：`sample_interval_seconds`（默认 300）                                                                                                               |
 | 正样本区采样 | 工单失败**之前** **H 秒**内 `[ft−H, ft]` 密集取锚点；**标注**看锚点**之后**闭区间 `[predict_ts, predict_ts+H]` 是否含工单                                                               |
 | 近故障负样本 | `[ft−prefault, ft−H)` 内按 `sample_interval_seconds` 取点；标注 **y=0**；负采样不足时**补齐**负类池                                                                           |
-| 负样本平衡  | 全量 `uniform` 均匀采样；冒烟 `random`；目标 `target_positive_ratio`（smoke preset **0.08**）；正样本过多时按 `max_rows×ratio/(1−ratio)` 下采样                                     |
+| 负样本平衡  | 全量 `uniform` 均匀采样；冒烟 `random`；目标 `target_positive_ratio`（smoke preset **0.08**）；正样本过多时按 `max_rows×ratio/(1−ratio)` 下采样；与正/近故障区的交叠处理见 **§3.5.2** |
 | sid 覆盖 | 负采样优先全部工单 sid，再覆盖 mcelog 其余 sid                                                                                                                            |
 | 时间范围   | **负样本 / 近故障区** clamp 在 `[t_min+W, t_max−H]`；**正样本区**在 `[ft−H, ft]`（ft 可 > t_max）；bounds 扫描与预处理使用相同 **CE 过滤**（spatial 默认 `[1,2]`）；无 mcelog 的工单 sid 无法生成正锚点（`_valid_predict_bounds` 为 None） |
 | 冒烟规模   | `max_rows=500` 时负样本会补满至上限；`mcelog_scan_rows` 须与实验 `mcelog_max_rows` 一致（默认 **800000**）                                                                      |
@@ -142,9 +142,30 @@ flowchart TB
 
 - **正样本区**：每个故障时刻前 **H 秒**（`label_horizon_seconds`）内按 `positive_sample_interval_seconds`（默认 60s）取锚点；
 - **近故障区**：再向前至 `positive_prefault_seconds`（`index_build` 基础默认 3600s；**full preset** 覆盖为 86400s/24h）按 `sample_interval_seconds` 取困难负样本候选；
-- **负样本全局**：从各 sid 合法时间轴均匀 / 随机采样，逼近 `target_positive_ratio`。
+- **负样本全局**：从各 sid 合法时间轴均匀 / 随机采样，逼近 `target_positive_ratio`（如何避开正样本点、与近故障区是否交叠见 **§3.5.2**）。
 
 因此索引 CSV 中 `predict_time` 的**秒分量通常不是 :00/:05/:10**，属预期行为。任务语义仍为：在锚点 `predict_ts` 用 `[predict_ts−W, predict_ts)` 的 mcelog 预测 `[predict_ts, predict_ts+H]` 内是否故障；与锚点是否系统时钟整点同步无关。若需与线上 cron 严格一致，可在索引构建阶段另行增加系统时钟整点同步（当前实现未包含）。
+
+### 3.5.2 全局负样本如何避开正样本区 / 近故障区（交叠与处理）
+
+索引构建顺序（`index_builder.build_index_dataframe`）：先生成工单驱动候选（正样本区 + 近故障区）→ 标注拆成 `pos_df`（y=1）与 `near_neg`（y=0）→ 再采**全局负样本** → 负样本不足时把 `near_neg` **补进**负类池 → `(sid, predict_time)` 去重后与正样本合并。
+
+**全局负采样时的两道过滤**（`uniform` / `random` 均适用）：
+
+| 过滤 | 实现 | 作用 |
+|------|------|------|
+| 跳过会打成正例的点 | `_is_positive_at(sid, t, …)`：若标签窗 `[t, t+H]` 内存在工单失败时刻则跳过 | **可靠避开正样本**（按标签定义，而非仅按区间几何） |
+| 跳过已生成的工单驱动候选 | `exclude =` 全部 prefault 候选行的 `(sid, predict_time)` 集合（含正样本区与近故障区网格点） | **避免与已列出的候选精确重复** |
+
+要点：
+
+1. **不是**把整段近故障时间窗 `[ft−prefault, ft−H)` 从合法轴上挖空；只排除「已经作为候选写出的精确锚点」。
+2. **网格相位可能不同**：近故障从 `max(ft−prefault, t_min+W)` 起按 `sample_interval_seconds` 步进；全局负样本从 `t_min+W` 起按同一步长（可再乘 `neg_stride_multiplier`）步进。起点不同时，全局网格点可落在近故障**时间段内**，却不在 `near_neg` 列表中 → **仍可能被采为全局负样本**（时间上「像近故障」，但不是同一批候选行的精确重复）。
+3. **近故障负样本会故意进入最终索引**：当全局负样本数 `< n_neg_target` 时，从 `near_neg` 抽样补齐（困难负样本）。因此最终负类 = 全局负样本 ∪（不足时补入的近故障负样本）。
+4. **精确重复**：合并后对 `(sid, predict_time)` 做 `drop_duplicates`。
+5. **同一 sid 多故障**：A 的近故障区与 B 的正样本区可能时间重叠；候选先统一进 `ticket_df` 再按标签拆分——horizon 内命中任一故障则进正样本，否则进 `near_neg`，不会同一锚点既正又负。
+
+实现见 `src/dram2cnn/data/index_builder.py`：`exclude` 构造、`_negatives_uniform_for_sid` / `_negative_candidates_random`、`near_neg` 补齐逻辑。
 
 ```bash
 export PYTHONPATH=src

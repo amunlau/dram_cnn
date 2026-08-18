@@ -259,13 +259,15 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 | 字段 | 含义 |
 |------|------|
 | `sample_interval_seconds` | 负样本 / 近故障区锚点步长（秒） |
-| `positive_sample_interval_seconds` | 正样本 label 窗口 `[ft−H, ft]` 内步长（默认 60；H=300 时约 5 点/故障） |
+| `positive_sample_interval_seconds` | 正样本 label 窗口 `[ft−H, ft]` 内步长（默认 60；H=300 时闭区间约 **6** 点/故障，含 `ft`） |
 | `positive_prefault_seconds` | 近故障困难负样本区宽度（默认 1h；full preset 24h） |
 | `target_positive_ratio` | 目标正样本比例（基值 0.25；**smoke preset 0.08**、**full preset 0.15**） |
 | `neg_sample_strategy` | `uniform`（全量，正常时段均匀采样）或 `random`（冒烟） |
 | `min_neg_per_ticket_sid` | 每个工单 sid 至少采样的负样本数 |
 | `min_positives` / `min_total_rows` | 写入前校验（smoke preset 默认 5 / 50；full 默认 50 / 500） |
 | `max_positive_candidates` | 可选正样本行数上限；为 `null` 且设 `max_rows` 时自动取 `max_rows×ratio/(1−ratio)`（smoke 约 43/500） |
+
+全局负采样与正样本区 / 近故障区的**交叠与 `exclude` 处理**见 [`data_processing_guide.md`](./data_processing_guide.md) §3.5.2（规范层说明见 [`dataset_processing_specification.md`](./dataset_processing_specification.md) §3.2）。
 
 **`window_seconds` / `label_horizon_seconds`** 在 **`index_build` 段不重复配置**，由 `data.yaml` 顶层字段（或 命令行 `--label-horizon-seconds` / `--window-seconds`）决定，避免与预处理不一致。
 
@@ -347,6 +349,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 | `conv_kernel_size` | 3 或 5 |
 | `use_batch_norm` | 是否使用 BatchNorm |
 | `head_hidden` / `dropout` | 分类 MLP 宽度与 Dropout |
+| `head_bias` | 分类头（及 `tabular_dim>0` 时投影 Linear）是否含 bias；**默认 `true`**。硬件无偏置交付（`exp_full_f1_nobias_*`）在实验 YAML 覆盖为 `false`；`use_batch_norm=true` 时卷积本身已无 bias |
 
 骨干采用 VGG 风格的纯卷积堆叠（Conv→BN→ReLU）。默认 spatial 配置约 **11 个 Conv2d、~3.2M 参数**（`C=31`）。**修改 backbone 结构后须重新训练**（checkpoint 须与结构一致）。
 
@@ -560,11 +563,19 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ## 第十四章 深入：`imbalance` 各子项如何共同作用
 
-### 14.1 类别权重：`inverse_freq` 与 `cap`
+### 14.1 类别权重：`sqrt`（默认）/ `inverse_freq` 与 `cap`
 
-设训练集（**原始** `y_train`，未过采样前）正样本数为 `P`、负样本数为 `N`。`inverse_freq` 方案下正类相对权重与 `N/P` 成正比，再经 `positive_weight_cap` 截断，避免 `P` 极小时权重爆炸导致优化发散。该权重作为 `CrossEntropyLoss` 的 `weight` 参数（或等价路径）进入损失。
+设训练集正样本数为 `P`、负样本数为 `N`。此处的 `y_train` 是 **预处理空窗剔除之后、切分进训练集、且尚未做正样本索引过采样** 的标签向量（丢负空窗会抬高正例占比，从而影响 `N/P`）。
 
-**为何还要 Focal**：在难例与易例梯度比例仍不理想时，Focal 通过 `focal_gamma` 压低「易分类样本」的贡献，使优化更关注难分样本。`focal_gamma: 0` 或空值表示退回普通加权交叉熵，便于做消融实验。
+默认 `weight_scheme: sqrt`：
+
+\[
+w_-=1,\qquad w_+=\min\big(\sqrt{N/P},\;\texttt{positive\_weight\_cap}\big)
+\]
+
+可选 `inverse_freq`（更激进）：\(w_+=\min(N/P,\,\texttt{cap})\)。`cap` 默认 **30.0**，避免 `P` 极小时权重爆炸。该权重作为 `CrossEntropyLoss` 的 `weight=[w_-, w_+]` 进入损失。
+
+**为何还要 Focal**：在难例与易例梯度比例仍不理想时，Focal 通过 `focal_gamma` 压低「易分类样本」的贡献。GridCNN-Deep 在默认学习率下建议保持 `focal_gamma: 0`（普通加权 CE），以免数值不稳定。
 
 ### 14.2 正样本过采样：`positive_oversample_factor`
 

@@ -1,0 +1,167 @@
+{
+  "base": {
+    "project_name": "dram2cnn",
+    "seed": 42,
+    "run_name": "exp_tianchi_full_f1_nobias_allint8_ddp",
+    "versioned_runs": true,
+    "run_id": null,
+    "checkpoint_run_id": null,
+    "infer_run_id": null,
+    "evaluate_run_id": null,
+    "device": "auto",
+    "gpu": {
+      "auto_batch_size": true,
+      "vram_budget_frac": 0.8,
+      "vram_reserve_mib": 512,
+      "batch_size_min": 8,
+      "batch_size_max": 512
+    },
+    "ddp": {
+      "enabled": "auto",
+      "nproc_per_node": "auto"
+    }
+  },
+  "data": {
+    "mcelog_path": "/root/workspace/data/raw/mcelog.csv",
+    "tickets_path": "/root/workspace/data/raw/trouble_tickets.csv",
+    "inventory_path": "/root/workspace/data/raw/inventory.csv",
+    "window_seconds": 300,
+    "label_horizon_seconds": 300.0,
+    "label_backtrace_seconds": 300.0,
+    "label_failure_types": [
+      1,
+      2,
+      3
+    ],
+    "index_features_path": "/root/workspace/data/raw/features_index_h300s_step300s_full.csv",
+    "index_build": {
+      "sample_interval_seconds": 300,
+      "positive_sample_interval_seconds": 60,
+      "positive_prefault_seconds": 3600,
+      "target_positive_ratio": 0.25,
+      "neg_stride_multiplier": 1,
+      "neg_sample_strategy": "uniform",
+      "max_neg_grid_points_per_sid": 128,
+      "min_neg_per_ticket_sid": 1,
+      "seed": 42
+    },
+    "index_build_presets": {
+      "smoke": {
+        "mcelog_scan_rows": 800000,
+        "smoke_max_sids": 80,
+        "max_rows": 500,
+        "positive_sample_interval_seconds": 60,
+        "positive_prefault_seconds": 3600,
+        "target_positive_ratio": 0.08,
+        "min_positives": 5,
+        "neg_sample_strategy": "random",
+        "min_total_rows": 50
+      },
+      "full": {
+        "mcelog_scan_rows": null,
+        "smoke_max_sids": null,
+        "max_rows": null,
+        "positive_sample_interval_seconds": 60,
+        "positive_prefault_seconds": 86400,
+        "target_positive_ratio": 0.15,
+        "neg_sample_strategy": "uniform",
+        "min_neg_per_ticket_sid": 3,
+        "max_neg_grid_points_per_sid": 512,
+        "min_positives": 50,
+        "min_total_rows": 500
+      }
+    },
+    "drop_empty_mcelog_windows": true,
+    "drop_empty_positive_windows": false,
+    "normalization_method": "robust",
+    "normalization_clip": 20.0,
+    "processed_dir": "/root/workspace/data/processed",
+    "splits_dir": "/root/workspace/data/splits",
+    "grid_representation": "spatial_heatmap",
+    "row_bin_size": 1024,
+    "col_bin_size": 32,
+    "num_bank_channels": 16,
+    "inventory_as_grid_channels": true,
+    "mcelog_error_type_filter": [
+      1,
+      2
+    ],
+    "grid_max_row": 4095,
+    "grid_max_col": 4095,
+    "preprocess_workers": 1,
+    "preprocess_parallel_frac": 0.6,
+    "ram_total_gib": null,
+    "ram_budget_frac": 0.85,
+    "mcelog_chunk_rows": 400000,
+    "max_index_rows": null,
+    "mcelog_max_rows": null,
+    "split_strategy": "time_stratified",
+    "time_split": {
+      "train_ratio": 0.7,
+      "val_ratio": 0.15,
+      "test_ratio": 0.15,
+      "min_pos_per_split": 1
+    }
+  },
+  "model": {
+    "arch": "grid_cnn",
+    "in_channels": 31,
+    "grid_height": 128,
+    "grid_width": 32,
+    "num_classes": 2,
+    "tabular_dim": 0,
+    "tabular_fuse_dim": 64,
+    "stem_channels": 64,
+    "backbone_channels": [
+      64,
+      128,
+      256,
+      256
+    ],
+    "blocks_per_stage": 2,
+    "conv_kernel_size": 3,
+    "use_batch_norm": true,
+    "head_hidden": 256,
+    "dropout": 0.25,
+    "head_bias": false
+  },
+  "train": {
+    "batch_size": 512,
+    "epochs": 300,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "num_workers": 2,
+    "prefetch_factor": 2,
+    "max_grad_norm": 1.0,
+    "cudnn_benchmark": true,
+    "patience": 50,
+    "early_stop_metric": "best_f1",
+    "imbalance": {
+      "use_class_weight": true,
+      "weight_scheme": "sqrt",
+      "positive_weight_cap": 30.0,
+      "focal_gamma": 0.0,
+      "positive_oversample_factor": 2,
+      "use_weighted_sampler": false,
+      "sampler_positive_boost": 1.0
+    },
+    "threshold_search": {
+      "enabled": true,
+      "objective": "f1",
+      "min": 0.1,
+      "max": 0.9,
+      "step": 0.02,
+      "min_precision": 0.0,
+      "min_recall": 0.0,
+      "f_beta": 2.0
+    }
+  },
+  "infer": {
+    "batch_size": 512,
+    "mode": "full",
+    "threshold_override": null,
+    "gpu": {
+      "batch_size_max": 2048
+    }
+  }
+}

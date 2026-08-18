@@ -23,3 +23,6 @@ conv_kernel_size: 3
 use_batch_norm: true
 head_hidden: 256
 dropout: 0.25
+# 分类头 Linear 是否含 bias；use_batch_norm=true 时 Conv 本已无 bias。
+# 硬件无偏置交付实验可在实验 YAML 中 overrides.model.head_bias: false
+head_bias: true

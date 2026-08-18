@@ -104,6 +104,7 @@ Jupyter 会持久化单元格输出；若笔记本显示与当前源码不符的
 - **含义**：本仓库索引在**正样本 label 窗口** `[ft−H, ft]` 内按 **`positive_sample_interval_seconds`（默认 60s）** 取锚点；**近故障 / 负样本区**按 **`sample_interval_seconds=300`** 在相对时间轴上取点，**不同步于系统时钟整 5 分钟**。
 - **是否正常**：是。标签/特征窗仍按相对秒定义：`[predict_ts−W, predict_ts)` 与 `[predict_ts, predict_ts+H]`。  
 - **详情**：见 **`docs/data_processing_guide.md` §3.5.1**。若需模拟线上 cron 整点推理，需另行在索引构建阶段做系统时钟整点同步（当前未实现）。
+- **全局负样本会不会采到正样本/近故障点**：采全局负样本时会跳过标签为 y=1 的点，并 `exclude` 掉已生成的工单驱动候选精确锚点；**不会**挖空整段近故障时间窗，故时间上落在近故障窗内、但网格未对齐的点仍可能进入全局负样本。负样本不足时还会把近故障 y=0 **补进**负类池。详见 **`docs/data_processing_guide.md` §3.5.2**。
 
 ## Jupyter 内核缓存了已导入的 `dram2cnn` 模块
 
@@ -139,6 +140,7 @@ Jupyter 会持久化单元格输出；若笔记本显示与当前源码不符的
 
 - **含义**：该样本在 `[predict_ts − window_seconds, predict_ts)` 内无 mcelog 事件，对应 mcelog 通道为全零。
 - **默认行为**（`drop_empty_mcelog_windows: true`）：仅丢弃 **y=0** 的空窗行；**正样本** 空窗仍保留（manifest：`n_empty_grids_kept_positive`）。
+- **与类别权重的关系**：训练时 `class_weight` 按 **空窗剔除之后** 的 `y_train` 计数（且在正样本索引过采样之前）；详见 `docs/project_configuration_reference.md` §14.1。
 - **诊断**：检查索引 sid 是否在 mcelog 中有覆盖、时间轴是否一致；重建索引后清空 `data/processed`、`data/splits` 重新执行预处理。
 
 ## 推理报错「无法解析阈值文件 best_threshold.json」

@@ -14,6 +14,7 @@
 - **变换**：网格逐 cell `log1p` 后堆成 `[C,H,W]`；切分阶段按训练集 **robust（median/IQR，IQR≈0 时改用 MAD/std）** 或 **zscore** 标准化，并可选 **clip 到 ±normalization_clip**（默认 20）。见 `splitter.normalize_split_features_by_train`。
 - **正样本规则**（对应天池工单规则）：对配置的 `label_failure_types`，若存在同一 `sid` 的工单满足  
   `predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds`（字段别名 `label_backtrace_seconds`），则 `y=1`，否则 `0`。
+- **索引自建时的负样本交叠**：全局负采样跳过会打成 \(y=1\) 的点，并 `exclude` 工单驱动候选的精确锚点；**不**挖空近故障整段时间窗；负样本不足时近故障 \(y=0\) 补入负类。详见 [`data_processing_guide.md`](./data_processing_guide.md) §3.5.2。
 
 ## 配置要点（`configs/data.yaml`）
 
@@ -51,4 +52,5 @@
 - `in_channels`、`grid_height` / `grid_width` 必须与预处理写出的 `X.npy` 及 `preprocess_manifest.json` 中 `grid_shape` 一致（spatial 默认 **31×128×32**）。
 - **Backbone**：`stem_channels` + 4×(`blocks_per_stage` 卷积块 + MaxPool)；默认 **blocks_per_stage=2**，纯卷积堆叠，约 **11 个 Conv2d**。
 - `backbone_channels`、`conv_kernel_size`、`head_hidden`、`dropout` 等可由 Optuna 搜索（`configs/hpo/hpo.yaml`）。
+- `head_bias`：分类头 Linear 是否含 bias（**默认 true**）；无偏置硬件交付实验见 `exp_full_f1_nobias_*.yaml`（`false`）。
 - `tabular_dim`：spatial 且 inventory 已拼入网格时为 **0**；legacy 或与 spatial+独立 tabular 并存时为 **15**。

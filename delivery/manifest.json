@@ -1,0 +1,88 @@
+{
+  "model": "model/grid_cnn_w8a8_packed.pt",
+  "threshold_file": "model/deploy_threshold.json",
+  "input_quant_params": "model/input_quant_params.json",
+  "deploy_threshold": 0.64,
+  "model_format": "gridcnn_w8a8_packed_v2",
+  "packed_size_bytes": 3218613,
+  "force_zero_bias": true,
+  "all_layers_int8": true,
+  "protect_stem": false,
+  "protect_head_out": false,
+  "sparsity_target": 0.3,
+  "docs": {
+    "deploy_readme": "README.md",
+    "evidence_readme": "evidence/README.md",
+    "early_stop_note": "evidence/notes/训练早停与第6轮最优说明.md",
+    "model_structure": "model/模型结构说明.md"
+  },
+  "evidence": {
+    "root": "evidence/",
+    "train": {
+      "dir": "evidence/train/",
+      "session": "20260817_073128_320980",
+      "run_name": "exp_tianchi_full_f1_nobias_allint8_ddp",
+      "best_epoch": 6,
+      "early_stop_epoch": 56,
+      "key_files": [
+        "evidence/train/epoch_metrics.csv",
+        "evidence/train/best_val_metrics.json",
+        "evidence/train/train_20260817_073128_320980.log",
+        "evidence/train/figures/val_best_f1_curve.png"
+      ]
+    },
+    "infer_eval": {
+      "dir": "evidence/infer_eval/",
+      "infer_session": "infer_20260817_074320_526979",
+      "key_files": [
+        "evidence/infer_eval/metrics.json",
+        "evidence/infer_eval/confusion_matrix.json",
+        "evidence/infer_eval/predictions.csv"
+      ]
+    },
+    "fuse_prune_quant": {
+      "dir": "evidence/fuse_prune_quant/",
+      "session": "fuse_prune_quant_20260817_074338_000730",
+      "key_files": [
+        "evidence/fuse_prune_quant/summary.md",
+        "evidence/fuse_prune_quant/fuse_prune_quantize.log",
+        "evidence/fuse_prune_quant/w8a8/quantization_report.json",
+        "evidence/fuse_prune_quant/w8a8/grid_cnn_w8a8_packed.pt"
+      ]
+    },
+    "logs_archive": "evidence/logs_archive/"
+  },
+  "splits": {
+    "test": {
+      "X_fp32": "data/X_test.npy",
+      "X_int8": "data/X_test_int8.npy",
+      "y": "data/y_test.npy",
+      "n": 5348,
+      "x_shape": [
+        5348,
+        31,
+        128,
+        32
+      ],
+      "x_int8_dtype": "uint8",
+      "y_dtype": "int64",
+      "pos_rate": 0.27898279730740466
+    },
+    "val": {
+      "X_fp32": "data/X_val.npy",
+      "X_int8": "data/X_val_int8.npy",
+      "y": "data/y_val.npy",
+      "n": 5348,
+      "x_shape": [
+        5348,
+        31,
+        128,
+        32
+      ],
+      "x_int8_dtype": "uint8",
+      "y_dtype": "int64",
+      "pos_rate": 0.27916978309648466
+    }
+  },
+  "说明": "交付清单索引：模型、阈值、数据与证据路径。部署请以 model/ 与 data/ 为准；过程追溯见 evidence/。本次为整网全 INT8（含主干首层与分类末层）。"
+}

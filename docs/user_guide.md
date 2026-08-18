@@ -611,6 +611,7 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_f1_ddp
 2. **1 小时**：读 [`tianchi_pipeline.md`](tianchi_pipeline.md) + 手动跑一遍 §5 分步命令（或与笔记本冒烟对照）。
 3. **半天**：笔记本**04 全量 F1** 或 **05 召回/精度**（§6）；sid 对比见各笔记本 sid 单元。
 4. **深入**：[`data_processing_guide.md`](data_processing_guide.md) + [`project_configuration_reference.md`](project_configuration_reference.md)。
+5. **部署交付**：仓库根目录 [`delivery/`](../delivery/README.md)（无偏置 + 整网 INT8 模型/数据/证据）；一体流水线见 `scripts/fuse_prune_quantize.sh` 与实验 `exp_full_f1_nobias_allint8_ddp.yaml`。
 
 ---
 
