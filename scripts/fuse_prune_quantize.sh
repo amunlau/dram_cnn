@@ -6,7 +6,7 @@
 #   对已训练 checkpoint：
 #     1) Conv+BN+ReLU 融合，并强制丢弃 bias（硬件无偏置）
 #     2) 非结构化 L1 剪枝（默认 30%）+ 可选短时微调
-#     3) W8A8 PTQ，导出 packed INT8
+#     3) 逐层对称 signed INT8 PTQ（zp=0；非逐通道、非 uint8），导出 packed INT8
 #   写入 <train_dir>/fuse_prune_quant_<timestamp>/（含 fuse_prune_quantize.log）
 #
 # 【怎么用】

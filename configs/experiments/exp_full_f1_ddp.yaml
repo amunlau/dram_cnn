@@ -1,4 +1,7 @@
 # 全量 + 项目主评价指标：验证集 F1 最大化（time 切分；早停与阈值搜索均以 F1 为目标）
+# 继承 train.yaml 的 patience=50（不是冒烟的 6）。best_f1 常在第 2～6 轮见顶，
+# 训练仍会跑到约 50+ 轮才停；保存的是历史最优。见
+# delivery/evidence/notes/训练早停与第2轮最优说明.md
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml

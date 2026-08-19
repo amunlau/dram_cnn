@@ -1,0 +1,86 @@
+---
+pid: 70455
+cwd: "/root/workspace"
+command: "cd /root/workspace && bash scripts/train_ddp.sh configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml"
+title: "Rerun full 3-GPU DDP training patience=50"
+status: succeeded
+started_at: 2026-08-18T11:32:36.061Z
+running_for_ms: 684225   
+---
+[train_ddp.sh] CUDA_VISIBLE_DEVICES=<not-set, use all visible GPUs>
+[train_ddp.sh] exp_config=configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml
+[train_ddp.sh] index_features_path OK: /root/workspace/data/raw/features_index_h300s_step300s_full.csv
+[gpu_launch:train] visible GPUs (3): cuda:0 NVIDIA GeForce RTX 4090 23.52GiB, cuda:1 NVIDIA GeForce RTX 4090 23.52GiB, cuda:2 NVIDIA GeForce RTX 4090 23.52GiB
+[gpu_launch:train] auto batch_size=512 (vram_budget_frac=0.8)
+[train.sh] device configured=auto, resolved=cuda, cuda_count=3, ddp_enabled=1, nproc_per_node=3
+[train.sh] batch_size=512 (auto=1)
+[train.sh] launch_plan using_all_visible_gpus=1 (1=yes,0=no)
+[train.sh] DDP: torchrun --nnodes=1 --nproc_per_node=3 --rdzv_backend=c10d --rdzv_endpoint=127.0.0.1:29500 -m dram2cnn.pipelines.run_train configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml
+2026-08-18 19:32:50,958 [WARNING] n_empty_grids=35260（已丢弃负样本空窗 30666，正样本空窗丢弃 0 / 保留 4594）；全量模式下空窗比例仍偏高，请核对 sid 匹配、window_seconds 与 mcelog 时间轴。
+2026-08-18 19:32:50,959 [INFO] 数据摘要: index_features_path=/root/workspace/data/raw/features_index_h300s_step300s_full.csv | preprocess_manifest n_samples=35654 pos_rate=0.2790 | train N=24958 pos=6963 | val N=5348 pos=1493
+2026-08-18 19:32:50,959 [INFO] Using batch_size=512 from VRAM auto-probe (≤80% GPU memory)
+2026-08-18 19:32:50,960 [INFO] Train launch context: world_size=3, rank=0, local_rank=0, configured_device=auto, resolved_device=cuda, cuda_available=True, cuda_count=3, batch_size=512, using_all_visible_gpus=True
+2026-08-18 19:32:51,466 [INFO] Model GridCNN: conv_layers=11 params=3184192
+2026-08-18 19:32:52,659 [INFO] Imbalance: use_class_weight=True scheme=sqrt cap=30.0 focal_gamma=0.0 positive_oversample_factor=2 train_virtual_len=31921 weighted_sampler=False ddp=True
+2026-08-18 19:32:52,659 [INFO] Early stopping: metric=best_f1 patience=50（该标量越大越好；连续 patience 轮无提升则停止）。 日志中 best_f1 为「验证集上阈值搜索后的 F1」，f1@0.5 为固定 0.5 阈值，二者不可混为一谈。
+2026-08-18 19:33:15,537 [INFO] Epoch 1/300 | loss=0.443981 | roc_auc=0.884922 | pr_ap=0.836888 | f1@0.5=0.600217 | best_f1=0.743789 | best_t=0.9000 | sec=17.58
+2026-08-18 19:33:27,705 [INFO] Epoch 2/300 | loss=0.369637 | roc_auc=0.890179 | pr_ap=0.846332 | f1@0.5=0.625691 | best_f1=0.760243 | best_t=0.7600 | sec=8.24
+2026-08-18 19:33:39,698 [INFO] Epoch 3/300 | loss=0.366942 | roc_auc=0.892711 | pr_ap=0.848663 | f1@0.5=0.648227 | best_f1=0.757364 | best_t=0.7400 | sec=8.08
+2026-08-18 19:33:52,342 [INFO] Epoch 4/300 | loss=0.370358 | roc_auc=0.882055 | pr_ap=0.838945 | f1@0.5=0.626759 | best_f1=0.752322 | best_t=0.7400 | sec=8.62
+2026-08-18 19:34:04,924 [INFO] Epoch 5/300 | loss=0.363184 | roc_auc=0.877914 | pr_ap=0.831729 | f1@0.5=0.641892 | best_f1=0.747045 | best_t=0.7800 | sec=8.58
+2026-08-18 19:34:17,284 [INFO] Epoch 6/300 | loss=0.350812 | roc_auc=0.875524 | pr_ap=0.832478 | f1@0.5=0.612613 | best_f1=0.743426 | best_t=0.8200 | sec=8.35
+2026-08-18 19:34:29,440 [INFO] Epoch 7/300 | loss=0.347861 | roc_auc=0.877200 | pr_ap=0.833330 | f1@0.5=0.647012 | best_f1=0.748591 | best_t=0.7400 | sec=8.29
+2026-08-18 19:34:42,029 [INFO] Epoch 8/300 | loss=0.333227 | roc_auc=0.880314 | pr_ap=0.833445 | f1@0.5=0.649114 | best_f1=0.748790 | best_t=0.7800 | sec=8.43
+2026-08-18 19:34:54,765 [INFO] Epoch 9/300 | loss=0.316014 | roc_auc=0.868024 | pr_ap=0.823390 | f1@0.5=0.659848 | best_f1=0.744800 | best_t=0.7800 | sec=8.65
+2026-08-18 19:35:06,928 [INFO] Epoch 10/300 | loss=0.312747 | roc_auc=0.872511 | pr_ap=0.826153 | f1@0.5=0.632299 | best_f1=0.748342 | best_t=0.8600 | sec=8.17
+2026-08-18 19:35:18,918 [INFO] Epoch 11/300 | loss=0.300349 | roc_auc=0.881092 | pr_ap=0.836016 | f1@0.5=0.654725 | best_f1=0.748547 | best_t=0.8800 | sec=8.15
+2026-08-18 19:35:31,128 [INFO] Epoch 12/300 | loss=0.293252 | roc_auc=0.868275 | pr_ap=0.822796 | f1@0.5=0.676571 | best_f1=0.732100 | best_t=0.8000 | sec=8.36
+2026-08-18 19:35:42,974 [INFO] Epoch 13/300 | loss=0.273161 | roc_auc=0.875476 | pr_ap=0.827164 | f1@0.5=0.668413 | best_f1=0.737439 | best_t=0.9000 | sec=7.89
+2026-08-18 19:35:55,375 [INFO] Epoch 14/300 | loss=0.276624 | roc_auc=0.878019 | pr_ap=0.829541 | f1@0.5=0.672000 | best_f1=0.734910 | best_t=0.8800 | sec=8.39
+2026-08-18 19:36:08,058 [INFO] Epoch 15/300 | loss=0.261878 | roc_auc=0.875322 | pr_ap=0.832648 | f1@0.5=0.692404 | best_f1=0.738499 | best_t=0.8400 | sec=8.69
+2026-08-18 19:36:21,073 [INFO] Epoch 16/300 | loss=0.241099 | roc_auc=0.876264 | pr_ap=0.828169 | f1@0.5=0.691734 | best_f1=0.727207 | best_t=0.7600 | sec=8.87
+2026-08-18 19:36:33,924 [INFO] Epoch 17/300 | loss=0.228951 | roc_auc=0.888835 | pr_ap=0.839886 | f1@0.5=0.687767 | best_f1=0.739521 | best_t=0.8800 | sec=8.90
+2026-08-18 19:36:46,789 [INFO] Epoch 18/300 | loss=0.214758 | roc_auc=0.891175 | pr_ap=0.840527 | f1@0.5=0.676806 | best_f1=0.737320 | best_t=0.8800 | sec=8.53
+2026-08-18 19:36:59,552 [INFO] Epoch 19/300 | loss=0.197710 | roc_auc=0.872358 | pr_ap=0.821841 | f1@0.5=0.685661 | best_f1=0.717463 | best_t=0.9000 | sec=8.76
+2026-08-18 19:37:12,566 [INFO] Epoch 20/300 | loss=0.191109 | roc_auc=0.865522 | pr_ap=0.820296 | f1@0.5=0.680799 | best_f1=0.722490 | best_t=0.8600 | sec=8.89
+2026-08-18 19:37:26,011 [INFO] Epoch 21/300 | loss=0.189845 | roc_auc=0.874690 | pr_ap=0.825381 | f1@0.5=0.691859 | best_f1=0.715088 | best_t=0.8000 | sec=9.00
+2026-08-18 19:37:39,506 [INFO] Epoch 22/300 | loss=0.178383 | roc_auc=0.867403 | pr_ap=0.824887 | f1@0.5=0.707803 | best_f1=0.730337 | best_t=0.9000 | sec=9.48
+2026-08-18 19:37:52,492 [INFO] Epoch 23/300 | loss=0.166475 | roc_auc=0.873452 | pr_ap=0.828156 | f1@0.5=0.697516 | best_f1=0.716493 | best_t=0.8600 | sec=9.03
+2026-08-18 19:38:04,635 [INFO] Epoch 24/300 | loss=0.165219 | roc_auc=0.870198 | pr_ap=0.822889 | f1@0.5=0.701359 | best_f1=0.716466 | best_t=0.9000 | sec=8.27
+2026-08-18 19:38:16,724 [INFO] Epoch 25/300 | loss=0.156054 | roc_auc=0.865277 | pr_ap=0.824276 | f1@0.5=0.724958 | best_f1=0.727621 | best_t=0.8600 | sec=8.26
+2026-08-18 19:38:29,698 [INFO] Epoch 26/300 | loss=0.137908 | roc_auc=0.870849 | pr_ap=0.825787 | f1@0.5=0.702065 | best_f1=0.721239 | best_t=0.8600 | sec=9.05
+2026-08-18 19:38:42,392 [INFO] Epoch 27/300 | loss=0.137932 | roc_auc=0.858891 | pr_ap=0.819206 | f1@0.5=0.709677 | best_f1=0.730604 | best_t=0.8600 | sec=8.76
+2026-08-18 19:38:55,019 [INFO] Epoch 28/300 | loss=0.138854 | roc_auc=0.864918 | pr_ap=0.817426 | f1@0.5=0.688535 | best_f1=0.716574 | best_t=0.8800 | sec=8.48
+2026-08-18 19:39:07,245 [INFO] Epoch 29/300 | loss=0.131606 | roc_auc=0.867171 | pr_ap=0.823236 | f1@0.5=0.703896 | best_f1=0.721068 | best_t=0.9000 | sec=8.27
+2026-08-18 19:39:20,239 [INFO] Epoch 30/300 | loss=0.121461 | roc_auc=0.860382 | pr_ap=0.818655 | f1@0.5=0.704245 | best_f1=0.735914 | best_t=0.8600 | sec=8.96
+2026-08-18 19:39:33,018 [INFO] Epoch 31/300 | loss=0.122734 | roc_auc=0.846284 | pr_ap=0.807145 | f1@0.5=0.703835 | best_f1=0.725445 | best_t=0.8800 | sec=8.68
+2026-08-18 19:39:45,714 [INFO] Epoch 32/300 | loss=0.126811 | roc_auc=0.871037 | pr_ap=0.823840 | f1@0.5=0.697412 | best_f1=0.719787 | best_t=0.9000 | sec=8.76
+2026-08-18 19:39:58,636 [INFO] Epoch 33/300 | loss=0.120711 | roc_auc=0.846726 | pr_ap=0.807963 | f1@0.5=0.702143 | best_f1=0.717804 | best_t=0.9000 | sec=9.05
+2026-08-18 19:40:11,428 [INFO] Epoch 34/300 | loss=0.114525 | roc_auc=0.845514 | pr_ap=0.803302 | f1@0.5=0.701215 | best_f1=0.704418 | best_t=0.9000 | sec=8.85
+2026-08-18 19:40:24,182 [INFO] Epoch 35/300 | loss=0.100069 | roc_auc=0.844046 | pr_ap=0.803268 | f1@0.5=0.691419 | best_f1=0.713396 | best_t=0.9000 | sec=8.76
+2026-08-18 19:40:36,684 [INFO] Epoch 36/300 | loss=0.109390 | roc_auc=0.851213 | pr_ap=0.812564 | f1@0.5=0.714640 | best_f1=0.718371 | best_t=0.9000 | sec=8.32
+2026-08-18 19:40:49,112 [INFO] Epoch 37/300 | loss=0.107072 | roc_auc=0.865359 | pr_ap=0.822228 | f1@0.5=0.706000 | best_f1=0.718453 | best_t=0.8000 | sec=8.43
+2026-08-18 19:41:01,620 [INFO] Epoch 38/300 | loss=0.107965 | roc_auc=0.838326 | pr_ap=0.802816 | f1@0.5=0.693614 | best_f1=0.721834 | best_t=0.9000 | sec=8.50
+2026-08-18 19:41:14,310 [INFO] Epoch 39/300 | loss=0.105208 | roc_auc=0.842346 | pr_ap=0.805427 | f1@0.5=0.705424 | best_f1=0.720848 | best_t=0.9000 | sec=8.68
+2026-08-18 19:41:26,955 [INFO] Epoch 40/300 | loss=0.100029 | roc_auc=0.844411 | pr_ap=0.805283 | f1@0.5=0.707405 | best_f1=0.722390 | best_t=0.8200 | sec=8.70
+2026-08-18 19:41:39,324 [INFO] Epoch 41/300 | loss=0.099419 | roc_auc=0.854413 | pr_ap=0.812906 | f1@0.5=0.706441 | best_f1=0.718796 | best_t=0.8600 | sec=8.39
+2026-08-18 19:41:51,699 [INFO] Epoch 42/300 | loss=0.086165 | roc_auc=0.845470 | pr_ap=0.806853 | f1@0.5=0.701903 | best_f1=0.715781 | best_t=0.9000 | sec=8.33
+2026-08-18 19:42:03,847 [INFO] Epoch 43/300 | loss=0.089828 | roc_auc=0.837717 | pr_ap=0.802064 | f1@0.5=0.706816 | best_f1=0.714336 | best_t=0.3200 | sec=8.17
+2026-08-18 19:42:16,263 [INFO] Epoch 44/300 | loss=0.094176 | roc_auc=0.854376 | pr_ap=0.813317 | f1@0.5=0.702120 | best_f1=0.717968 | best_t=0.9000 | sec=8.48
+2026-08-18 19:42:29,125 [INFO] Epoch 45/300 | loss=0.089468 | roc_auc=0.852469 | pr_ap=0.811991 | f1@0.5=0.711204 | best_f1=0.722001 | best_t=0.7800 | sec=8.64
+2026-08-18 19:42:41,493 [INFO] Epoch 46/300 | loss=0.080953 | roc_auc=0.850968 | pr_ap=0.811515 | f1@0.5=0.702893 | best_f1=0.716237 | best_t=0.9000 | sec=8.38
+2026-08-18 19:42:53,693 [INFO] Epoch 47/300 | loss=0.086402 | roc_auc=0.836317 | pr_ap=0.798465 | f1@0.5=0.706672 | best_f1=0.714810 | best_t=0.9000 | sec=8.34
+2026-08-18 19:43:06,282 [INFO] Epoch 48/300 | loss=0.083870 | roc_auc=0.825132 | pr_ap=0.794577 | f1@0.5=0.703636 | best_f1=0.716312 | best_t=0.8800 | sec=8.63
+2026-08-18 19:43:18,520 [INFO] Epoch 49/300 | loss=0.081487 | roc_auc=0.839846 | pr_ap=0.805858 | f1@0.5=0.711718 | best_f1=0.714738 | best_t=0.3000 | sec=8.32
+2026-08-18 19:43:30,751 [INFO] Epoch 50/300 | loss=0.088277 | roc_auc=0.843644 | pr_ap=0.803137 | f1@0.5=0.704039 | best_f1=0.708717 | best_t=0.6400 | sec=8.34
+2026-08-18 19:43:43,568 [INFO] Epoch 51/300 | loss=0.082919 | roc_auc=0.833003 | pr_ap=0.796208 | f1@0.5=0.699614 | best_f1=0.714669 | best_t=0.9000 | sec=8.81
+2026-08-18 19:43:56,531 [INFO] Epoch 52/300 | loss=0.085580 | roc_auc=0.822200 | pr_ap=0.791041 | f1@0.5=0.698610 | best_f1=0.716253 | best_t=0.9000 | sec=9.00
+2026-08-18 19:43:56,532 [INFO] Early stop at epoch 52: metric=best_f1 已连续 50 轮无提升（patience=50）；当前最优 best_f1=0.760243。
+2026-08-18 19:43:57,342 [INFO] Training done. Checkpoint: /root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/checkpoints/grid_cnn.pt
+2026-08-18 19:43:57,344 [INFO] 运行输出目录: /root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883
+
+---
+exit_code: 0
+elapsed_ms: 684223
+ended_at: 2026-08-18T11:44:00.284Z
+---

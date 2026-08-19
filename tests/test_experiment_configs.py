@@ -22,7 +22,7 @@ def test_experiment_yaml_loads(yaml_name: str) -> None:
 
 @pytest.mark.parametrize(
     "yaml_name",
-    ["exp_baseline.yaml", "exp_horizon_30m.yaml", "exp_horizon_1h.yaml"],
+    ["exp_baseline.yaml", "exp_horizon_30m.yaml", "exp_horizon_1h.yaml", "exp_baseline_nobias_symint8.yaml"],
 )
 def test_smoke_experiments_disable_ddp_and_auto_batch(yaml_name: str) -> None:
     """冒烟/对比实验须显式关闭 train/infer 的 DDP 与显存 batch 探测，避免 CI 意外多卡启动。"""

@@ -25,7 +25,8 @@ from dram2cnn.models.grid_cnn import GridCNN, _ConvBNReLU
 
 LogFn = Callable[..., None]
 
-PACKED_FORMAT = "gridcnn_w8a8_packed_v2"
+# v3：逐层（per-tensor）对称 signed INT8，权重与激活 zero-point 均为 0。
+PACKED_FORMAT = "gridcnn_w8a8_packed_v3"
 
 
 def _load_checkpoint_state(path: Path, map_location) -> Any:
@@ -182,53 +183,59 @@ def assert_no_biases(model: nn.Module) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def qparams_per_channel_symmetric(w: torch.Tensor, n_bits: int = 8) -> tuple[torch.Tensor, torch.Tensor]:
-    """返回 scale[C_out], zero_point[C_out]=0（对称）。"""
-    qmax = 2 ** (n_bits - 1) - 1
-    flat = w.detach().reshape(w.shape[0], -1)
-    max_abs = flat.abs().amax(dim=1).clamp(min=1e-8)
-    scale = max_abs / qmax
-    zp = torch.zeros_like(scale, dtype=torch.int32)
-    return scale, zp
+def qparams_per_tensor_symmetric(max_abs: float, n_bits: int = 8) -> tuple[float, int]:
+    """逐层对称量化：scale = max(|x|) / 127，zero_point=0，整数域 signed INT8。"""
+    qmax = 2 ** (n_bits - 1) - 1  # 127
+    a = max(float(abs(max_abs)), 1e-8)
+    return float(a / qmax), 0
 
 
-def qparams_per_tensor_asymmetric(xmin: float, xmax: float, n_bits: int = 8) -> tuple[float, int]:
-    qmin, qmax = 0, 2**n_bits - 1
-    xmin = min(xmin, 0.0)
-    xmax = max(xmax, 0.0)
-    if xmax - xmin < 1e-8:
-        xmax = xmin + 1e-8
-    scale = (xmax - xmin) / float(qmax - qmin)
-    zp = int(round(qmin - xmin / scale))
-    zp = int(max(qmin, min(qmax, zp)))
-    return float(scale), zp
+def qparams_weight_per_tensor_symmetric(w: torch.Tensor, n_bits: int = 8) -> tuple[torch.Tensor, torch.Tensor]:
+    """整层一个 scale（非逐通道）。返回 0 维 scale 与 zp=0。"""
+    max_abs = float(w.detach().abs().amax().clamp(min=1e-8))
+    scale, _zp = qparams_per_tensor_symmetric(max_abs, n_bits=n_bits)
+    return torch.tensor(scale, dtype=torch.float32), torch.tensor(0, dtype=torch.int32)
 
 
-def fake_quant_weight_per_channel(w: torch.Tensor, scale: torch.Tensor, n_bits: int = 8) -> torch.Tensor:
+def _scale_broadcast(scale: torch.Tensor, ndim: int) -> torch.Tensor:
+    """将标量或 [C_out] scale 扩成可与权重广播的形状。交付路径为标量。"""
+    s = scale.detach().reshape(-1)
+    if s.numel() == 1:
+        return s.reshape([1] * ndim)
+    return s.reshape([s.numel()] + [1] * (ndim - 1))
+
+
+def fake_quant_symmetric(x: torch.Tensor, scale: float | torch.Tensor, n_bits: int = 8) -> torch.Tensor:
+    """对称 fake-quant：q ∈ [-128, 127]，ŷ = q * scale，zero_point=0。"""
     qmin, qmax = -(2 ** (n_bits - 1)), 2 ** (n_bits - 1) - 1
-    shape = [w.shape[0]] + [1] * (w.ndim - 1)
-    s = scale.detach().reshape(shape)
-    inv = 1.0 / s
-    q = torch.clamp(torch.round(w * inv), qmin, qmax)
+    s = scale if torch.is_tensor(scale) else torch.tensor(scale, device=x.device, dtype=x.dtype)
+    s = _scale_broadcast(s.to(device=x.device, dtype=x.dtype), x.ndim)
+    q = torch.clamp(torch.round(x / s), qmin, qmax)
     return q * s
 
 
-def fake_quant_act_per_tensor(x: torch.Tensor, scale: float, zp: int, n_bits: int = 8) -> torch.Tensor:
-    qmin, qmax = 0, 2**n_bits - 1
-    inv = 1.0 / scale
-    q = torch.clamp(torch.round(x * inv + zp), qmin, qmax)
-    return (q - zp) * scale
+# 兼容旧测试名：现为逐层对称（忽略 zp）。
+def fake_quant_act_per_tensor(x: torch.Tensor, scale: float, zp: int = 0, n_bits: int = 8) -> torch.Tensor:
+    if int(zp) != 0:
+        # 旧非对称路径（uint8 域）仅保留给历史 packed v2
+        qmin, qmax = 0, 2**n_bits - 1
+        q = torch.clamp(torch.round(x / scale + zp), qmin, qmax)
+        return (q - zp) * scale
+    return fake_quant_symmetric(x, scale, n_bits=n_bits)
+
+
+def fake_quant_weight_per_tensor(w: torch.Tensor, scale: torch.Tensor, n_bits: int = 8) -> torch.Tensor:
+    return fake_quant_symmetric(w, scale, n_bits=n_bits)
 
 
 class AdaRoundWeight(nn.Module):
-    """AdaRound：学习 soft 舍入，逼近层输出重构误差最小。"""
+    """AdaRound：学习 soft 舍入，逼近层输出重构误差最小（逐层一个 scale）。"""
 
     def __init__(self, weight: torch.Tensor, scale: torch.Tensor, n_bits: int = 8):
         super().__init__()
         self.n_bits = n_bits
-        self.register_buffer("scale", scale.detach().clone())
-        shape = [weight.shape[0]] + [1] * (weight.ndim - 1)
-        s = self.scale.reshape(shape)
+        self.register_buffer("scale", scale.detach().reshape(-1).clone())
+        s = _scale_broadcast(self.scale, weight.ndim)
         self.register_buffer("w_floor", torch.floor(weight.detach() / s))
         rest = weight.detach() / s - self.w_floor
         init = -torch.log(1.0 / rest.clamp(1e-4, 1 - 1e-4) - 1.0)
@@ -236,16 +243,17 @@ class AdaRoundWeight(nn.Module):
         self.qmin = -(2 ** (n_bits - 1))
         self.qmax = 2 ** (n_bits - 1) - 1
 
+    def _s(self) -> torch.Tensor:
+        return _scale_broadcast(self.scale, self.w_floor.ndim)
+
     def soft_weight(self, temp: float = 1.0) -> torch.Tensor:
-        shape = [self.w_floor.shape[0]] + [1] * (self.w_floor.ndim - 1)
-        s = self.scale.reshape(shape)
+        s = self._s()
         h = torch.sigmoid(self.alpha / max(temp, 1e-3))
         w_int = torch.clamp(self.w_floor + h, self.qmin, self.qmax)
         return w_int * s
 
     def hard_weight(self) -> torch.Tensor:
-        shape = [self.w_floor.shape[0]] + [1] * (self.w_floor.ndim - 1)
-        s = self.scale.reshape(shape)
+        s = self._s()
         h = (self.alpha >= 0).to(self.w_floor.dtype)
         w_int = torch.clamp(self.w_floor + h, self.qmin, self.qmax)
         return w_int * s
@@ -301,7 +309,7 @@ class QuantGridCNN(nn.Module):
             mod = self.adaround[ar_key]
             return mod.hard_weight() if self.use_hard_round else mod.soft_weight()
         scale = torch.tensor(spec.weight_scale, device=w.device, dtype=w.dtype)
-        return fake_quant_weight_per_channel(w, scale)
+        return fake_quant_weight_per_tensor(w, scale)
 
     def _qact(self, name: str, x: torch.Tensor) -> torch.Tensor:
         if not self.enable_act_quant:
@@ -411,24 +419,24 @@ def calibrate_activations(
     out: dict[str, tuple[float, float]] = {}
     for name, chunks in ranges.items():
         if not chunks:
-            out[name] = (-1.0, 1.0)
+            out[name] = (1.0,)
             continue
         t = torch.cat(chunks, dim=0)
         if t.numel() > 5_000_000:
             idx = torch.randperm(t.numel())[:5_000_000]
             t = t[idx]
-        lo = float(torch.quantile(t, 1.0 - pct))
-        hi = float(torch.quantile(t, pct))
-        out[name] = (min(lo, 0.0), max(hi, 0.0))
+        amax = float(torch.quantile(t.abs(), pct))
+        out[name] = (amax,)
     return out
 
 
-def apply_act_ranges(model: QuantGridCNN, act_ranges: dict[str, tuple[float, float]]) -> None:
-    for name, (lo, hi) in act_ranges.items():
-        scale, zp = qparams_per_tensor_asymmetric(lo, hi)
+def apply_act_ranges(model: QuantGridCNN, act_ranges: dict[str, tuple[float, ...]]) -> None:
+    for name, rng in act_ranges.items():
+        amax = float(rng[0]) if len(rng) == 1 else max(abs(float(rng[0])), abs(float(rng[1])))
+        scale, zp = qparams_per_tensor_symmetric(amax)
         spec = model.layer_specs[name]
         spec.act_in_scale = scale
-        spec.act_in_zp = zp
+        spec.act_in_zp = int(zp)
         model.set_spec(spec)
 
 
@@ -634,8 +642,7 @@ def pack_int8_weights(
             packed_weight_bytes += int(w.numel()) * 4
         else:
             scale = torch.tensor(spec["weight_scale"], dtype=torch.float32)
-            shape = [w.shape[0]] + [1] * (w.ndim - 1)
-            s = scale.reshape(shape)
+            s = _scale_broadcast(scale, w.ndim)
             q = torch.clamp(torch.round(w / s), -128, 127).to(torch.int8)
             packed[wk] = {
                 "dtype": "int8",
@@ -668,6 +675,16 @@ def pack_int8_weights(
         "model_cfg": dict(model_cfg),
         "protect_stem": bool(export.get("protect_stem", True)),
         "protect_head_out": bool(export.get("protect_head_out", True)),
+        "quant_scheme": {
+            "weight": "per-layer-symmetric-int8",
+            "activation": "per-layer-symmetric-int8",
+            "signed": True,
+            "zero_point": 0,
+            "qmin": -128,
+            "qmax": 127,
+            "not_per_channel": True,
+            "not_uint8": True,
+        },
         "layer_specs": specs,
         "packed_weights": packed,
         "other_state": other_state,
@@ -812,13 +829,13 @@ def run_w8a8_ptq(
     qmodel = QuantGridCNN(folded).to(device)
     for name, kind, mod in iter_quant_layers(qmodel):
         w = mod.conv.weight if kind == "conv" else mod.weight  # type: ignore[attr-defined]
-        scale, _zp = qparams_per_channel_symmetric(w)
+        scale, _zp = qparams_weight_per_tensor_symmetric(w)
         keep = (name == "stem" and protect_stem) or (name == "head.3" and protect_head_out)
         qmodel.set_spec(
             LayerQuantSpec(
                 name=name,
                 kind=kind,
-                weight_scale=scale.cpu().tolist(),
+                weight_scale=[float(scale.item())],
                 act_in_scale=1.0,
                 act_in_zp=0,
                 keep_fp32=keep,
@@ -924,9 +941,9 @@ def run_w8a8_ptq(
 
     report = {
         "method": "PTQ + BN Folding + AdaRound-style + post-AdaRound act recalib + packed INT8 infer",
-        "scheme": "W8A8",
-        "weight_quant": "per-channel symmetric int8",
-        "activation_quant": "per-tensor asymmetric int8",
+        "scheme": "W8A8_per_layer_symmetric_int8",
+        "weight_quant": "per-layer (per-tensor) symmetric signed int8, zp=0",
+        "activation_quant": "per-layer (per-tensor) symmetric signed int8, zp=0 (not uint8)",
         "bn_folding": True,
         "force_zero_bias": bool(force_zero_bias),
         "skip_fold": bool(skip_fold),
@@ -937,7 +954,7 @@ def run_w8a8_ptq(
             "split": "val",
             "n_samples": len(calib_idx),
             "sampling": f"uniform random seed={seed} without replacement",
-            "act_observer": "percentile 99.9% asymmetric range including 0",
+            "act_observer": "percentile 99.9% of |x| → symmetric scale=amax/127, zp=0",
             "recalib_after_adaround": True,
         },
         "protect_layers": {"stem": protect_stem, "head.3": protect_head_out},
@@ -986,7 +1003,7 @@ def run_w8a8_ptq(
         },
         "notes": [
             "w8a8_test_deployment 为 fake-quant 仿真精度；w8a8_int8_packed_test_deployment 为加载 int8 打包权重的参考推理。",
-            "可用 bash scripts/infer_int8.sh 对 packed 模型单独推理。",
+            "逐层对称 signed INT8（权重与激活 zp=0，整数域 [-128,127]，非 uint8、非逐通道）。",
             "主评价指标为部署阶段 F1（固定验证集阈值）。",
             "Precision 上升通常因固定阈值下预测正例变少（FP 下降快于 TP），伴随 Recall 下降。",
         ],

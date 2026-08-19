@@ -5,6 +5,7 @@
 # 【做什么】
 #   内部调用 scripts/train.sh；后者读取 base.yaml 的 gpu/ddp（可被实验 overrides 覆盖），
 #   自动选择 torchrun 或单进程，并按 80% 显存上限探测 batch_size。
+#   全量 checkpoint 是历史最优（当前交付验证最优第 2 轮、第 52 轮才停），见 train.sh 头注释。
 #
 # 【怎么用】
 #   bash scripts/train_ddp.sh

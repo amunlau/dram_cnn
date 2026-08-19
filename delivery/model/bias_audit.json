@@ -5,5 +5,15 @@
   "ok_no_bias": true,
   "keep_fp32_layers": [],
   "all_layers_int8": true,
-  "说明": "已检查 packed_weights / other_state / layer_specs：无 bias；且无 keep_fp32 层，整网权重均为 INT8。"
+  "quant_scheme": {
+    "weight": "per-layer-symmetric-int8",
+    "activation": "per-layer-symmetric-int8",
+    "signed": true,
+    "zero_point": 0,
+    "qmin": -128,
+    "qmax": 127,
+    "not_per_channel": true,
+    "not_uint8": true
+  },
+  "说明": "已检查 packed_weights / other_state / layer_specs：无 bias；无 keep_fp32 层；整网权重为逐层对称 signed INT8（zp=0，非 uint8、非逐通道）。"
 }

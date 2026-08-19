@@ -2,12 +2,13 @@
 
 加载 ``grid_cnn_w8a8_packed.pt``（由 PTQ 导出），按 **INT8 算术语义** 前向：
 
-- 可量化层：激活先量化为 uint8 域，权重以 **int8 缓冲区** 驻留；卷积/线性用
-  ``(x_q - zp) * w_q`` 再乘 ``act_scale * weight_scale``（标准 QDQ / 参考 INT8 路径）。
-- 保护层（默认 stem / head.3）：保持 FP32 权重，跳过该层输入激活量化。
+- **v3（当前交付）**：激活与权重均为 **逐层对称 signed INT8**（zero_point=0，整数域 [-128, 127]）；
+  卷积/线性为 ``x_q * w_q`` 再乘 ``act_scale * weight_scale``（weight_scale 为标量）。
+- **v1/v2 兼容**：激活可为 uint8 非对称（带 zp）；权重可为逐通道 scale。
+- 保护层（``keep_fp32``）：保持 FP32 权重，跳过该层输入激活量化。
 
 说明：本实现保证与打包权重一致的数值语义与内存布局（权重以 int8 存储），
-便于校验与对接 TensorRT/ORT；**不**调用 cuDNN/TensorRT INT8 内核，故墙钟时延
+便于校验与对接；**不**调用 cuDNN/TensorRT INT8 内核，故墙钟时延
 不可与专用加速引擎对比。
 """
 from __future__ import annotations
@@ -39,7 +40,8 @@ logger = logging.getLogger(__name__)
 
 PACKED_FORMAT_V1 = "gridcnn_w8a8_packed_v1"
 PACKED_FORMAT_V2 = "gridcnn_w8a8_packed_v2"
-SUPPORTED_PACKED_FORMATS = frozenset({PACKED_FORMAT_V1, PACKED_FORMAT_V2})
+PACKED_FORMAT_V3 = "gridcnn_w8a8_packed_v3"
+SUPPORTED_PACKED_FORMATS = frozenset({PACKED_FORMAT_V1, PACKED_FORMAT_V2, PACKED_FORMAT_V3})
 
 _WEIGHT_KEY = {
     "stem": "stem.conv.weight",
@@ -67,12 +69,31 @@ def _load_torch(path: Path, map_location) -> Any:
         return torch.load(str(path), map_location=map_location)
 
 
-def quantize_activation_uint8(x: torch.Tensor, scale: float, zp: int) -> torch.Tensor:
-    """返回量化后的整数域张量（仍为 float32，值为 0..255）。"""
+def quantize_activation_int8(x: torch.Tensor, scale: float, zp: int = 0) -> torch.Tensor:
+    """返回量化后的整数域张量（仍为 float32）。
+
+    zp==0：对称 signed INT8，值域 [-128, 127]（当前交付）。
+    zp!=0：兼容旧 packed v2 的 uint8 非对称，值域 [0, 255]。
+    """
     if scale <= 0:
         raise ValueError(f"act scale must be > 0, got {scale}")
+    if int(zp) == 0:
+        q = torch.round(x / scale).clamp(-128, 127)
+        return q
     q = torch.round(x / scale + float(zp)).clamp(0, 255)
     return q
+
+
+def _weight_scale_view(scale: torch.Tensor, conv: bool) -> torch.Tensor:
+    """逐层标量 scale 广播到 conv [1,C,1,1] 或 linear [1,C]；逐通道则用 C_out。"""
+    s = scale.float().reshape(-1)
+    if conv:
+        if s.numel() == 1:
+            return s.reshape(1, 1, 1, 1)
+        return s.reshape(1, -1, 1, 1)
+    if s.numel() == 1:
+        return s.reshape(1, 1)
+    return s.reshape(1, -1)
 
 
 class Int8PackedGridCNN(nn.Module):
@@ -155,13 +176,13 @@ class Int8PackedGridCNN(nn.Module):
             y = F.conv2d(x, w, bias, meta["stride"], meta["padding"], meta["dilation"], meta["groups"])
             return F.relu(y, inplace=True)
 
-        x_q = quantize_activation_uint8(x, spec.act_in_scale, spec.act_in_zp)
+        x_q = quantize_activation_int8(x, spec.act_in_scale, spec.act_in_zp)
         x_c = x_q - float(spec.act_in_zp)
         w_q = self._w_int8[key].float()
         y = F.conv2d(
             x_c, w_q, None, meta["stride"], meta["padding"], meta["dilation"], meta["groups"]
         )
-        scale = self._w_scale[key].reshape(1, -1, 1, 1) * float(spec.act_in_scale)
+        scale = _weight_scale_view(self._w_scale[key], conv=True) * float(spec.act_in_scale)
         y = y * scale
         if bias is not None:
             y = y + bias.reshape(1, -1, 1, 1)
@@ -174,11 +195,11 @@ class Int8PackedGridCNN(nn.Module):
         if spec.keep_fp32 or key in self._w_fp32:
             return F.linear(x, self._w_fp32[key], bias)
 
-        x_q = quantize_activation_uint8(x, spec.act_in_scale, spec.act_in_zp)
+        x_q = quantize_activation_int8(x, spec.act_in_scale, spec.act_in_zp)
         x_c = x_q - float(spec.act_in_zp)
         w_q = self._w_int8[key].float()
         y = F.linear(x_c, w_q, None)
-        scale = self._w_scale[key].reshape(1, -1) * float(spec.act_in_scale)
+        scale = _weight_scale_view(self._w_scale[key], conv=False) * float(spec.act_in_scale)
         y = y * scale
         if bias is not None:
             y = y + bias

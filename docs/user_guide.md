@@ -1,6 +1,6 @@
 # dram2cnn 使用说明
 
-本文档面向**实际操作**：从环境准备到冒烟验证、全量训练、多卡 DDP、Horizon 对比与超参搜索的**完整流程**。配置字段细节见 [`project_configuration_reference.md`](project_configuration_reference.md)；数据处理原理见 [`data_processing_guide.md`](data_processing_guide.md)；排错见 [`troubleshooting.md`](troubleshooting.md)。
+本文档面向**实际操作**：从环境准备到冒烟验证、全量训练、多卡 DDP、Horizon 对比与超参搜索的**完整流程**。配置字段细节见 [`project_configuration_reference.md`](project_configuration_reference.md)；数据处理原理见 [`data_processing_guide.md`](data_processing_guide.md)；训练如何学分数、如何在验证集上搜阈值见 [`training_principles.md`](training_principles.md)；排错见 [`troubleshooting.md`](troubleshooting.md)。
 
 ---
 
@@ -178,6 +178,8 @@ bash scripts/validate.sh configs/experiments/exp_baseline.yaml --no-require-spli
 bash scripts/train.sh configs/experiments/exp_baseline.yaml
 ```
 
+`checkpoints/grid_cnn.pt` 保存的是验证集 `early_stop_metric`（默认搜阈 F1）的**历史最优**，不是最后一轮。全量上高峰常出现在前几轮（当前交付为第 2 轮），`patience=50` 时训练仍会继续到约 50+ 轮才停；这不等于没训够。原理见 [`training_principles.md`](training_principles.md)；现象说明见 [`troubleshooting.md`](troubleshooting.md)「全量训练为何第 2 轮就是最优」。
+
 权重与日志示例路径：
 
 ```
@@ -251,6 +253,8 @@ bash scripts/evaluate.sh configs/experiments/exp_full_f1_ddp.yaml
 ```
 
 训练启动时 rank0 会打印**数据摘要**；若仍提示 stub 路径，说明 `index_features_path` 未改成功。
+
+全量 `patience=50`（冒烟 YAML 才覆盖为 6）。验证搜阈 F1 常在第 2～6 轮见顶，训练仍会跑到连续 50 轮无提升才停；磁盘权重是历史最优。当前无偏置 INT8 交付为第 2 轮最优、第 52 轮早停，属预期，见 [`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。
 
 ### 6.1 按 sid 切分（跨服务器泛化评估）
 
@@ -611,7 +615,7 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_f1_ddp
 2. **1 小时**：读 [`tianchi_pipeline.md`](tianchi_pipeline.md) + 手动跑一遍 §5 分步命令（或与笔记本冒烟对照）。
 3. **半天**：笔记本**04 全量 F1** 或 **05 召回/精度**（§6）；sid 对比见各笔记本 sid 单元。
 4. **深入**：[`data_processing_guide.md`](data_processing_guide.md) + [`project_configuration_reference.md`](project_configuration_reference.md)。
-5. **部署交付**：仓库根目录 [`delivery/`](../delivery/README.md)（无偏置 + 整网 INT8 模型/数据/证据）；一体流水线见 `scripts/fuse_prune_quantize.sh` 与实验 `exp_full_f1_nobias_allint8_ddp.yaml`。
+5. **部署交付**：仓库根目录 [`delivery/`](../delivery/README.md)（无偏置 + 整网**逐层对称 signed INT8** 模型/数据/证据）；一体流水线见 `scripts/fuse_prune_quantize.sh` 与实验 `exp_full_f1_nobias_allint8_ddp.yaml`。本次交付验证最优在第 2 轮、训练至第 52 轮早停（patience=50），属预期，见 [`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。
 
 ---
 
@@ -624,6 +628,9 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_f1_ddp
 - 全量实验样本数仍 ~500 → 未 `build_index.sh full`、未清空 `processed/` 重新执行预处理，或误用 baseline 实验
 - `n_empty_grids > 0` → 部分样本 mcelog 窗为空；默认仅丢弃 **负样本** 空窗（见 `drop_empty_mcelog_windows`）
 - DDP `nproc > GPU 数` → 调整 `nproc_per_node` 或 `CUDA_VISIBLE_DEVICES`
+- 想搞清「交叉熵学分数、验证集搜阈定刀」→ 见 [`training_principles.md`](training_principles.md)
+- `best_f1` 与 `f1@0.5` 差很多 → 见 [`troubleshooting.md`](troubleshooting.md)「早停看的是哪一列」
+- 全量第 2 轮就是最优、怀疑没训够 → 见 [`troubleshooting.md`](troubleshooting.md)「全量训练为何第 2 轮就是最优」
 
 ---
 

@@ -1,6 +1,9 @@
 # 全量 F1 + 无偏置 + 整网全 INT8 交付实验。
 # 训练阶段与 exp_full_f1_nobias_ddp 相同（分类头无 bias；复用 processed/splits）。
 # 量化阶段默认不保护首尾层（见 scripts/fuse_prune_quantize.sh，不加 --protect-ends）。
+# patience 显式 50（不是冒烟的 6）。全量 best_f1 常在第 2～6 轮见顶，训练仍会跑到
+# 约 50+ 轮才早停；保存的是历史最优而非最后一轮。见
+# delivery/evidence/notes/训练早停与第2轮最优说明.md
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml
@@ -27,6 +30,8 @@ overrides:
     head_bias: false
   train:
     early_stop_metric: best_f1
+    patience: 50  # 全量不得用冒烟的 6；最优轮次早 ≠ 提前停
+    epochs: 300
     imbalance:
       positive_oversample_factor: 2
       weight_scheme: sqrt

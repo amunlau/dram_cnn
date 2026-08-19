@@ -1,23 +1,26 @@
-"""W8A8 PTQ / packed INT8 参考推理单元测试（小模型、CPU）。"""
+"""W8A8 PTQ / packed INT8 参考推理单元测试（小模型、CPU）。
+
+当前方案：逐层（per-tensor）对称 signed INT8，zero_point=0。
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 
-from dram2cnn.engine.infer_int8 import load_packed_int8, predict_int8
+from dram2cnn.engine.infer_int8 import load_packed_int8, predict_int8, quantize_activation_int8
 from dram2cnn.engine.quantize_ptq import (
     FoldedConvReLU,
     QuantGridCNN,
     fold_batchnorm,
     iter_quant_layers,
     pack_int8_weights,
-    qparams_per_channel_symmetric,
-    qparams_per_tensor_asymmetric,
+    qparams_per_tensor_symmetric,
+    qparams_weight_per_tensor_symmetric,
     fake_quant_act_per_tensor,
-    fake_quant_weight_per_channel,
+    fake_quant_weight_per_tensor,
+    fake_quant_symmetric,
 )
 from dram2cnn.models.grid_cnn import GridCNN, _ConvBNReLU
 from dataclasses import asdict
@@ -38,40 +41,48 @@ def _tiny_cfg(**overrides) -> dict:
         "tabular_dim": 0,
         "use_batch_norm": True,
         "conv_kernel_size": 3,
+        "head_bias": False,
     }
     cfg.update(overrides)
     return cfg
 
 
-def test_qparams_symmetric_and_asymmetric():
+def test_qparams_per_layer_symmetric_int8():
     w = torch.tensor([[-2.0, 1.0], [0.5, -0.5]])
-    scale, zp = qparams_per_channel_symmetric(w)
-    assert scale.shape == (2,)
-    assert torch.all(zp == 0)
-    s, z = qparams_per_tensor_asymmetric(-1.0, 3.0)
-    assert s > 0
-    assert 0 <= z <= 255
-    x = torch.linspace(-1, 3, 16)
-    xq = fake_quant_act_per_tensor(x, s, z)
+    scale, zp = qparams_weight_per_tensor_symmetric(w)
+    assert scale.ndim == 0 or scale.numel() == 1
+    assert int(zp.item()) == 0
+    assert abs(float(scale) - (2.0 / 127.0)) < 1e-6
+    s, z = qparams_per_tensor_symmetric(3.0)
+    assert s > 0 and z == 0
+    x = torch.linspace(-3, 3, 16)
+    xq = fake_quant_symmetric(x, s)
     assert xq.shape == x.shape
-    wq = fake_quant_weight_per_channel(w, scale)
+    assert float(xq.abs().max()) <= 3.0 + 1e-5
+    wq = fake_quant_weight_per_tensor(w, scale)
     assert wq.shape == w.shape
+    # zp=0 路径
+    xq2 = fake_quant_act_per_tensor(x, s, 0)
+    assert torch.allclose(xq, xq2)
+    q = quantize_activation_int8(x, s, 0)
+    assert float(q.min()) >= -128
+    assert float(q.max()) <= 127
 
 
 def test_fold_batchnorm_with_bn_and_identity():
     cfg = _tiny_cfg(use_batch_norm=True)
     m = GridCNN(cfg)
-    # 填 BN 统计，避免全零
     with torch.no_grad():
         _ = m(torch.randn(2, 4, 16, 8))
-    fold_batchnorm(m)
+    fold_batchnorm(m, force_zero_bias=True)
+    assert type(m.stem).__name__ == "FoldedConvReLU"
     assert isinstance(m.stem, FoldedConvReLU)
     for mod in m.modules():
         assert not isinstance(mod, _ConvBNReLU)
 
     cfg2 = _tiny_cfg(use_batch_norm=False)
     m2 = GridCNN(cfg2)
-    fold_batchnorm(m2)
+    fold_batchnorm(m2, force_zero_bias=True)
     assert isinstance(m2.stem, FoldedConvReLU)
     y = m2(torch.randn(2, 4, 16, 8))
     assert y.shape == (2, 2)
@@ -83,25 +94,23 @@ def test_pack_and_int8_infer_smoke(tmp_path: Path):
     model = GridCNN(cfg)
     with torch.no_grad():
         _ = model(torch.randn(4, 4, 16, 8))
-    fold_batchnorm(model)
+    fold_batchnorm(model, force_zero_bias=True)
     qmodel = QuantGridCNN(model)
     for name, kind, mod in iter_quant_layers(qmodel):
         w = mod.conv.weight if kind == "conv" else mod.weight  # type: ignore[attr-defined]
-        scale, _ = qparams_per_channel_symmetric(w)
-        keep = name in ("stem", "head.3")
+        scale, _ = qparams_weight_per_tensor_symmetric(w)
         from dram2cnn.engine.quantize_ptq import LayerQuantSpec
 
         qmodel.set_spec(
             LayerQuantSpec(
                 name=name,
                 kind=kind,
-                weight_scale=scale.tolist(),
+                weight_scale=[float(scale.item())],
                 act_in_scale=0.05,
                 act_in_zp=0,
-                keep_fp32=keep,
+                keep_fp32=False,
             )
         )
-    # 简易「硬量化」写入权重
     qmodel.use_hard_round = True
     qmodel.enable_act_quant = True
     qmodel.enable_weight_quant = True
@@ -109,8 +118,8 @@ def test_pack_and_int8_infer_smoke(tmp_path: Path):
     export = {
         "format": "test",
         "threshold": 0.5,
-        "protect_stem": True,
-        "protect_head_out": True,
+        "protect_stem": False,
+        "protect_head_out": False,
         "layer_specs": {k: asdict(v) for k, v in qmodel.layer_specs.items()},
         "state_dict": {
             k: v.detach().cpu() for k, v in qmodel.state_dict().items() if not k.startswith("adaround")
@@ -128,10 +137,8 @@ def test_pack_and_int8_infer_smoke(tmp_path: Path):
         logits_fq = qmodel(x)
         logits_i8 = int8_m(x)
     assert logits_i8.shape == (3, 2)
-    # 保护层 + 相同 qparams 下应非常接近
     assert torch.allclose(logits_fq, logits_i8, atol=1e-4, rtol=1e-3)
 
-    # 端到端 predict_int8
     n = 8
     x_path = tmp_path / "X_test.npy"
     y_path = tmp_path / "y_test.npy"

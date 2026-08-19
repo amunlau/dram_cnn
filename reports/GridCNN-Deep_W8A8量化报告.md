@@ -4,10 +4,22 @@
 
 **文档编号**：DRAM2CNN-QUANT-W8A8-2026-001  
 **项目名称**：天池 DRAM 故障预测 · 空间热图 2D-CNN（dram2cnn）  
-**版本**：V1.0  
+**版本**：V1.1（交付方案更新）  
 **编制日期**：2026年7月29日  
-**关联实验**：时间分层 F1 主实验 `exp_full_f1_ddp`  
+**最近更新**：2026年8月18日  
+**关联实验**：时间分层 F1 主实验 `exp_full_f1_ddp`（历史）；当前交付 `exp_full_f1_nobias_allint8_ddp`  
 **仓库路径**：`/root/workspace`
+
+> **2026-08-18 交付更新（请以下游 `delivery/` 为准）**  
+> 当前交付量化方案已改为：  
+> - **逐层（per-tensor）对称 signed INT8**（权重与激活 `zp=0`，整数域 `[-128, 127]`）  
+> - **不是 uint8，不是逐通道量化**  
+> - **整网无偏置**（Conv+BN+ReLU 融合后丢弃 BN 折合 bias）  
+> - **stem / head.3 一并量化**（勿再按「保护首尾层」实现）  
+> - 打包格式：`gridcnn_w8a8_packed_v3`  
+> 最新数字与模型见 [`delivery/README.md`](../delivery/README.md)；整数推理参数见 [`reports/GridCNN_W8A8_硬件整数推理参数提取.json`](GridCNN_W8A8_硬件整数推理参数提取.json)。  
+> 本次交付训练验证最优在第 2 轮（patience=50，第 52 轮早停），属预期，见 [`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。  
+> 下文 §1–§9 保留 2026-07-29 历史 PTQ 记录（当时为逐通道权重 + 非对称激活、可保护首尾层），仅作对照，**不要按该历史方案对接当前交付模型**。
 
 ---
 

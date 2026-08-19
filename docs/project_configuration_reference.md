@@ -1,7 +1,7 @@
 # DRAM 网格 CNN 项目：配置体系详解（参考手册）
 
 > **2026-06 实验命名**：项目主评价指标 F1 见 `exp_full_f1_*`（笔记本**04**）；工程实验召回/精度见 `exp_full_recall_*` / `exp_full_precision_*`（笔记本 **05**）。下文说明「全量数据定义」时以 **`exp_full_f1_ddp.yaml`**（主评价指标）与 **`exp_full_recall_ddp.yaml`**（工程实验）为例；冒烟对照见 **`exp_baseline.yaml`**。
-> **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。
+> **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；训练如何学分数、如何搜阈见 [`training_principles.md`](./training_principles.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。全量上验证搜阈 F1 常在前几轮见顶（当前交付第 2 轮、第 52 轮才停）属预期，见 §13.5 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ---
 
@@ -380,7 +380,8 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 - 日志中的 **`best_f1` 列**表示「验证集上对概率做阈值搜索后的 F1」；**默认 `early_stop_metric: best_f1` 时，早停也看同一标量**。  
 - `f1@0.5` 是固定 0.5 阈值下的 F1，与 `best_f1` 不可混淆解读。  
-- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。
+- 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。  
+- **全量 `best_f1` 也常在前几轮见顶（交付实验为第 2 轮）**：这不等于 patience 过小，也不等于只训了 2 轮。`patience=50` 时训练会继续到约第 50+ 轮才停；checkpoint 保存的是历史最优。训练损失下降或 `f1@0.5` 上升不能用来否定早期最优。详见 §13.5 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ### 7.3 `imbalance` 子树
 
@@ -395,7 +396,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ### 7.4 `threshold_search`
 
-验证阶段在 `[min,max]` 上以 `step` 扫描阈值，写入 **`best_threshold.json`**；推理阶段读取该文件作为默认阈值（缺失则用 0.5；**JSON 损坏会报错**，不会在未告警时回退到默认值）。
+验证阶段在 `[min,max]` 上以 `step` 扫描阈值，写入 **`best_threshold.json`**；推理阶段读取该文件作为默认阈值（缺失则用 0.5；**JSON 损坏会报错**，不会在未告警时回退到默认值）。概念、网格步骤与「为何不是 0.5」见 [`training_principles.md`](training_principles.md)。
 
 **`objective`**（`train.threshold_search.objective`）：
 
@@ -535,7 +536,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 
 ## 第十三章 深入：早停、验证指标与日志列的语义辨析
 
-本章专门回应训练日志中常见的**误读**，其根源在于「**列名**」与「**早停所用的标量**」不是同一概念。
+本章专门回应训练日志中常见的**误读**，其根源在于「**列名**」与「**早停所用的标量**」不是同一概念。训练如何学分数、如何搜阈见 [`training_principles.md`](training_principles.md)。全量实验「第 2 轮就是最优」见 §13.5，不要据此判定训练失败。
 
 ### 13.1 验证阶段实际计算了什么
 
@@ -558,6 +559,17 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 ### 13.4 小验证集与早停的耦合关系
 
 当 `N_val` 只有十几条时，AUC/AP 的估计量方差极大，且排序关系在有限样本上呈阶梯状：模型参数轻微变化不一定改变「正类分数的相对次序」，从而 AUC/AP **多 epoch 不变**。若此时 `early_stop_metric` 为 `avg_precision` 且 `patience` 较大，会出现「训练似乎没进步却跑了很多轮」或「很快触发早停」两种极端，取决于首轮是否偶然达到该平台。**这不等价于数据泄漏**；泄漏应通过「训练样本是否误入验证」「时间切分是否跨越泄漏」「重复 sid」等数据审计验证。仓库在训练开始打印的**数据摘要**与 stub 路径告警，是为了把「数据规模异常小」与「指标异常好/坏」区分开来。
+
+### 13.5 全量实验「第 2 轮最优」为什么可以正常
+
+全量验证集约 5348 条，**不是** §13.4 的小验证集问题。交付实验（`exp_full_f1_nobias_allint8_ddp`，会话 `20260818_193250_910883`）中：
+
+- 验证搜阈 F1 在 **第 2 轮** 达到 0.760（τ=0.76），之后回落；ROC-AUC 在第 3 轮见顶（0.893）后降到第 52 轮的 0.822。  
+- `patience=50`，训练在第 **52** 轮早停。保存的是第 2 轮权重。  
+- 训练损失从 0.37 降到 0.08；固定 0.5 阈值 F1 后期可升到 0.72+。这两条曲线**不能**用来论证「应改用最后一轮」。  
+- 独立测试集部署 F1≈0.7679，略高于验证，与历史全量（最优曾出现在第 6 轮，测试 F1≈0.767）同一水平。
+
+原因简述：CE 热图空间模式粗、模型容量足够、Adam 0.001 + 大 batch + 类别权重/过采样使主分界面很快拟合；`best_f1` 对分数分布和阈值敏感，高峰容易出现在前几轮。这是过拟合发生得早，不是训练失败。排错入口见 `docs/troubleshooting.md`；交付侧完整数字见 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ---
 

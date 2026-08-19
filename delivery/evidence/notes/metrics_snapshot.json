@@ -3,50 +3,54 @@
     "threshold": 0.76,
     "threshold_source": "验证集 best_threshold.json（推理评估使用；作为部署口径主指标汇报）",
     "metrics": {
-      "accuracy": 0.8788332086761406,
-      "f1": 0.7672413793103449,
-      "precision": 0.826625386996904,
-      "recall": 0.7158176943699732,
-      "roc_auc": 0.8968304678896021,
-      "avg_precision": 0.8562951102367293
+      "accuracy": 0.8793941660433807,
+      "f1": 0.767902123065851,
+      "precision": 0.8290598290598291,
+      "recall": 0.7151474530831099,
+      "roc_auc": 0.8933953074766667,
+      "avg_precision": 0.8488532176084573
     }
   },
   "int8_after_fuse_prune_all_layers": {
-    "accuracy": 0.8846297681376215,
-    "f1": 0.742164646886753,
-    "precision": 0.9855715871254163,
-    "recall": 0.5951742627345844,
-    "roc_auc": 0.8493153839842925,
-    "avg_precision": 0.8076786107000045,
-    "threshold": 0.64,
+    "accuracy": 0.8833208676140614,
+    "f1": 0.748792270531401,
+    "precision": 0.9375,
+    "recall": 0.6233243967828418,
+    "roc_auc": 0.8745937878922718,
+    "avg_precision": 0.8201136373432888,
+    "threshold": 0.56,
     "confusion": {
-      "tp": 888,
-      "fp": 13,
-      "fn": 604,
-      "tn": 3843
-    }
+      "tp": 930,
+      "fp": 62,
+      "fn": 562,
+      "tn": 3794
+    },
+    "precision_from_counts": 0.9375,
+    "recall_from_counts": 0.6233243967828418
   },
   "pipeline_stages": {
     "fp32_train": {
-      "f1_deploy": 0.7672413793103449,
-      "f1_valtau": 0.7672413793103449
+      "f1_deploy": 0.767902123065851,
+      "f1_valtau": 0.767902123065851
     },
     "fused_nobias": {
-      "f1_deploy": 0.2654647186820019,
-      "f1_valtau": 0.4385655496766608
+      "f1_deploy": 0.23449239909138564,
+      "f1_valtau": 0.43625730994152045
     },
     "fused_pruned": {
-      "f1_deploy": 0.6998327759197325,
-      "f1_valtau": 0.7519818799546999
+      "f1_deploy": 0.7236139630390144,
+      "f1_valtau": 0.7676240208877284
     },
     "w8a8_all_int8": {
-      "f1_deploy": null,
-      "f1_valtau": 0.742164646886753
+      "f1_deploy": 0.748792270531401,
+      "f1_valtau": 0.748792270531401
     }
   },
+  "quant_scheme": "W8A8_per_layer_symmetric_int8",
   "说明": {
     "fp32_nobias_deployment": "无偏置单精度训练权重在测试集上的部署口径指标",
-    "int8_after_fuse_prune_all_layers": "融合无偏置 → 剪枝 → 整网 W8A8 后交付模型在测试集上的指标",
-    "pipeline_stages": "各阶段 F1 对照（deploy=固定训练阈值；valtau=验证集重新搜索阈值后）"
+    "int8_after_fuse_prune_all_layers": "融合无偏置 → 剪枝 → 整网逐层对称 signed INT8 后交付模型在测试集上的指标",
+    "pipeline_stages": "各阶段 F1 对照（deploy=固定训练阈值；valtau=验证集重新搜索阈值后）",
+    "early_peak_epoch": "FP32 验证搜阈 F1 最优在第 2 轮；patience=50，第 52 轮才停。不是只训了 2 轮。见 训练早停与第2轮最优说明.md"
   }
 }

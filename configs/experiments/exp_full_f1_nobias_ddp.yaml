@@ -1,5 +1,7 @@
 # 全量 F1 主实验变体：分类头无 bias；卷积在 BN 开启时本已无 bias。
 # 复用 data/processed + data/splits（与 7/29 F1 主实验同一套切分），不重跑 preprocess。
+# 继承 patience=50。全量 best_f1 常在前几轮见顶，不等于只训了几轮。
+# 见 delivery/evidence/notes/训练早停与第2轮最优说明.md
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml

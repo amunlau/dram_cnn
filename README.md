@@ -18,7 +18,7 @@
 | **输入** | **`X`** `[N,C,H,W]`，默认 **C=31** |
 | **标签** | **`y`**∈{0,1}，`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds` |
 | **模型** | **GridCNN-Deep**（`model.yaml`）；冒烟 **`model_smoke.yaml`** |
-| **评价指标** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索）；工程实验可改为 **`avg_precision`** + `threshold_profile` |
+| **评价指标** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索）；工程实验可改为 **`avg_precision`** + `threshold_profile`。全量上搜阈 F1 常在前几轮见顶（交付为第 2 轮、训练至第 52 轮才停），属预期，见 `delivery/evidence/notes/训练早停与第2轮最优说明.md` |
 | **验收** | 主实验部署阶段 F1≥0.6（已达标）；正式数字见 `outputs/tables/full_all_strategies_deployment_kpi.csv` |
 
 ---
@@ -175,9 +175,10 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 | `docs/data_processing_guide.md` | 数据处理与索引设计 |
 | `docs/tianchi_pipeline.md` | 规格速查 |
 | `docs/project_configuration_reference.md` | 配置长篇说明 |
+| `docs/training_principles.md` | 训练原理与验证集阈值搜索（交叉熵学分数、搜阈定刀、早停选轮） |
 | `docs/troubleshooting.md` | 排错（含量化 / 剪枝 / 先剪枝后量化） |
 | `docs/dataset_processing_specification.md` | 算法向数据处理规范（锚点交叠、空窗、算例） |
-| `delivery/` | 无偏置 + 整网 INT8 交付包（模型/数据/证据/ONNX；见其中 README） |
+| `delivery/` | 无偏置 + 整网**逐层对称 signed INT8** 交付包（模型/数据/证据/ONNX；见其中 README） |
 | `new-delivery/` | 在线推理与数据处理技术说明（锚点/热图/空窗/加权/台账；不含量化细节） |
 | `reports/GridCNN先剪枝后量化说明.md` | 剪枝→量化评估口径与复现 |
 

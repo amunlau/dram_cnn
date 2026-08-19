@@ -1,15 +1,15 @@
 {
   "n_rows": 5348,
   "threshold": 0.76,
-  "checkpoint": "/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260817_073128_320980/checkpoints/grid_cnn.pt",
+  "checkpoint": "/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/checkpoints/grid_cnn.pt",
   "splits_dir": "/root/workspace/data/splits",
   "device_resolved": "cuda",
   "world_size": 3,
   "y_prob_summary": {
-    "min": 0.025100883096456528,
-    "max": 0.9997357726097107,
-    "mean": 0.48644984958772797,
-    "nunique": 3992
+    "min": 0.05208999663591385,
+    "max": 0.999990701675415,
+    "mean": 0.5044388850097646,
+    "nunique": 3999
   },
   "columns": [
     "sample_index",

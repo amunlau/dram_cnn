@@ -19,6 +19,8 @@
 
 **阅读顺序**：主报告 → `算法开发与实验结果.md` → `algorithm_scripts_index.md` → 量化 / 剪枝 / 先剪枝后量化专题 → `figures/`。
 
+当前无偏置整网 INT8 交付的训练验证最优在第 2 轮（patience=50，第 52 轮才停），属预期，不是训练失败；见 `delivery/evidence/notes/训练早停与第2轮最优说明.md` 与主报告 §6.2。
+
 **剪枝与量化评估口径（摘要）**：
 
 - 数据：实验 YAML 指定的 **time_stratified 全量** `splits`（主实验 `data/splits`，约 24958/5348/5348）。

@@ -1,1 +1,284 @@
-../evidence/fuse_prune_quant/summary.json
+{
+  "pipeline": "fuse_nobias_prune_w8a8",
+  "ckpt": "/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/checkpoints/grid_cnn.pt",
+  "out_dir": "/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/fuse_prune_quant_20260818_194524_730260",
+  "force_zero_bias": true,
+  "protect_stem": false,
+  "protect_head_out": false,
+  "all_layers_int8": true,
+  "sparsity": 0.3,
+  "finetune_epochs": 5,
+  "elapsed_sec": 178.84842085838318,
+  "stages": {
+    "threshold_deploy": 0.76,
+    "sparsity": 0.3,
+    "fp32_train": {
+      "test_at_deploy_tau": {
+        "accuracy": 0.8793941660433807,
+        "f1": 0.767902123065851,
+        "precision": 0.8290598290598291,
+        "recall": 0.7151474530831099,
+        "roc_auc": 0.8933985231052473,
+        "avg_precision": 0.8488528931312948,
+        "threshold": 0.76,
+        "confusion": {
+          "tp": 1067,
+          "fp": 220,
+          "fn": 425,
+          "tn": 3636
+        }
+      },
+      "test_at_val_tau": {
+        "accuracy": 0.8793941660433807,
+        "f1": 0.767902123065851,
+        "precision": 0.8290598290598291,
+        "recall": 0.7151474530831099,
+        "roc_auc": 0.8933985231052473,
+        "avg_precision": 0.8488528931312948,
+        "threshold": 0.76,
+        "confusion": {
+          "tp": 1067,
+          "fp": 220,
+          "fn": 425,
+          "tn": 3636
+        }
+      },
+      "val_threshold": {
+        "threshold": 0.76,
+        "precision": 0.8766404199475065,
+        "recall": 0.6711319490957803,
+        "f1": 0.7602427921092565,
+        "objective": "f1"
+      },
+      "stats": {
+        "n_params": 3184192,
+        "n_params_nonzero": 3184192,
+        "weight_sparsity": 0.0,
+        "dense_macs": 1205666304.0,
+        "theoretical_macs": 1205666304.0,
+        "theoretical_gmacs": 1.205666304,
+        "macs_note": "theoretical; unstructured sparse speedup needs sparse kernels"
+      }
+    },
+    "fused_nobias": {
+      "test_at_deploy_tau": {
+        "accuracy": 0.18081525804038892,
+        "f1": 0.23449239909138564,
+        "precision": 0.15859134956275112,
+        "recall": 0.4497319034852547,
+        "roc_auc": 0.308282398935401,
+        "avg_precision": 0.30390013737358396,
+        "threshold": 0.76,
+        "confusion": {
+          "tp": 671,
+          "fp": 3560,
+          "fn": 821,
+          "tn": 296
+        }
+      },
+      "test_at_val_tau": {
+        "accuracy": 0.27898279730740466,
+        "f1": 0.43625730994152045,
+        "precision": 0.27898279730740466,
+        "recall": 1.0,
+        "roc_auc": 0.308282398935401,
+        "avg_precision": 0.30390013737358396,
+        "threshold": 0.1,
+        "confusion": {
+          "tp": 1492,
+          "fp": 3856,
+          "fn": 0,
+          "tn": 0
+        }
+      },
+      "val_threshold": {
+        "threshold": 0.1,
+        "precision": 0.27916978309648466,
+        "recall": 1.0,
+        "f1": 0.43648589387516445,
+        "objective": "f1"
+      },
+      "stats": {
+        "n_params": 3180480,
+        "n_params_nonzero": 3180480,
+        "weight_sparsity": 0.0,
+        "dense_macs": 66048.0,
+        "theoretical_macs": 66048.0,
+        "theoretical_gmacs": 6.6048e-05,
+        "macs_note": "theoretical; unstructured sparse speedup needs sparse kernels"
+      },
+      "bias_params": []
+    },
+    "fused_pruned": {
+      "test_at_deploy_tau": {
+        "accuracy": 0.8741585639491398,
+        "f1": 0.7236139630390144,
+        "precision": 0.9342523860021209,
+        "recall": 0.5904825737265416,
+        "roc_auc": 0.89673669320748,
+        "avg_precision": 0.8528964173609378,
+        "threshold": 0.76,
+        "confusion": {
+          "tp": 881,
+          "fp": 62,
+          "fn": 611,
+          "tn": 3794
+        }
+      },
+      "test_at_val_tau": {
+        "accuracy": 0.8835078534031413,
+        "f1": 0.7676240208877284,
+        "precision": 0.8654331370899916,
+        "recall": 0.6896782841823056,
+        "roc_auc": 0.89673669320748,
+        "avg_precision": 0.8528964173609378,
+        "threshold": 0.56,
+        "confusion": {
+          "tp": 1029,
+          "fp": 160,
+          "fn": 463,
+          "tn": 3696
+        }
+      },
+      "val_threshold": {
+        "threshold": 0.56,
+        "precision": 0.9201557935735151,
+        "recall": 0.6329537843268587,
+        "f1": 0.75,
+        "objective": "f1"
+      },
+      "prune": {
+        "method": "unstructured_l1",
+        "target_sparsity": 0.3,
+        "achieved_weight_sparsity": 0.3,
+        "before": {
+          "n_params": 3180480,
+          "n_params_nonzero": 3180480,
+          "weight_sparsity": 0.0,
+          "dense_macs": 66048.0,
+          "theoretical_macs": 66048.0,
+          "theoretical_gmacs": 6.6048e-05,
+          "macs_note": "theoretical; unstructured sparse speedup needs sparse kernels"
+        },
+        "after": {
+          "n_params": 3180480,
+          "n_params_nonzero": 2226336,
+          "weight_sparsity": 0.3,
+          "dense_macs": 66048.0,
+          "theoretical_macs": 46233.6,
+          "theoretical_gmacs": 4.62336e-05,
+          "macs_note": "theoretical; unstructured sparse speedup needs sparse kernels"
+        },
+        "param_reduction_ratio": 0.30000000000000004,
+        "theoretical_macs_reduction_ratio": 0.30000000000000004,
+        "notes": [
+          "非结构化剪枝不改变张量形状；加速依赖稀疏内核。",
+          "theoretical_macs 按 (1-sparsity)*dense_macs 估算。"
+        ]
+      },
+      "finetune": {
+        "epochs": 5,
+        "lr": 0.0001,
+        "train_loss": [
+          0.4840193061155524,
+          0.35637173877903755,
+          0.33130727105200297,
+          0.3207939735054253,
+          0.3170498873008846
+        ],
+        "n_train": 24958,
+        "skipped": false
+      },
+      "bias_params": []
+    },
+    "w8a8": {
+      "threshold": 0.56,
+      "protect_stem": false,
+      "protect_head_out": false,
+      "fp32_input_metrics": {
+        "accuracy": 0.8835078534031413,
+        "f1": 0.7676240208877284,
+        "precision": 0.8654331370899916,
+        "recall": 0.6896782841823056,
+        "roc_auc": 0.89673669320748,
+        "avg_precision": 0.8528964173609378,
+        "threshold": 0.56,
+        "confusion": {
+          "tp": 1029,
+          "fp": 160,
+          "fn": 463,
+          "tn": 3696
+        },
+        "precision_from_counts": 0.8654331370899916,
+        "recall_from_counts": 0.6896782841823056
+      },
+      "folded_metrics": {
+        "accuracy": 0.8835078534031413,
+        "f1": 0.7676240208877284,
+        "precision": 0.8654331370899916,
+        "recall": 0.6896782841823056,
+        "roc_auc": 0.89673669320748,
+        "avg_precision": 0.8528964173609378,
+        "threshold": 0.56,
+        "confusion": {
+          "tp": 1029,
+          "fp": 160,
+          "fn": 463,
+          "tn": 3696
+        },
+        "precision_from_counts": 0.8654331370899916,
+        "recall_from_counts": 0.6896782841823056
+      },
+      "fakequant_metrics": {
+        "accuracy": 0.8833208676140614,
+        "f1": 0.748792270531401,
+        "precision": 0.9375,
+        "recall": 0.6233243967828418,
+        "roc_auc": 0.8748640745108074,
+        "avg_precision": 0.820090419138108,
+        "threshold": 0.56,
+        "confusion": {
+          "tp": 930,
+          "fp": 62,
+          "fn": 562,
+          "tn": 3794
+        },
+        "precision_from_counts": 0.9375,
+        "recall_from_counts": 0.6233243967828418
+      },
+      "int8_packed_metrics": {
+        "accuracy": 0.8833208676140614,
+        "f1": 0.748792270531401,
+        "precision": 0.9375,
+        "recall": 0.6233243967828418,
+        "roc_auc": 0.8745937878922718,
+        "avg_precision": 0.8201136373432888,
+        "threshold": 0.56,
+        "confusion": {
+          "tp": 930,
+          "fp": 62,
+          "fn": 562,
+          "tn": 3794
+        },
+        "precision_from_counts": 0.9375,
+        "recall_from_counts": 0.6233243967828418
+      },
+      "sizes": {
+        "fp32_weights_and_biases_mb": 12.132568359375,
+        "theoretical_packed_mb": 3.033191680908203,
+        "packed_int8_file_mb": 3.0435686111450195,
+        "theoretical_compression_ratio": 3.999934602135743,
+        "fp32_state_dict_mb": 12.139204025268555,
+        "quant_export_file_mb": 12.138971328735352
+      },
+      "pack_path": "/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/fuse_prune_quant_20260818_194524_730260/w8a8/grid_cnn_w8a8_packed.pt"
+    }
+  },
+  "notes": [
+    "顺序：训练权重 → Conv+BN+ReLU 融合并丢弃 bias → 非结构化 L1 剪枝 → W8A8 PTQ。",
+    "force_zero_bias 会丢弃 BN 折合偏置，数值上不等价于标准 BN fold；属硬件约束。",
+    "整网全 INT8：主干首层与分类末层均量化（protect_stem/protect_head_out=False）。",
+    "量化方案：逐层（per-tensor）对称 signed INT8，权重与激活 zero-point=0；非逐通道、非 uint8。",
+    "主交付模型：w8a8/grid_cnn_w8a8_packed.pt"
+  ]
+}

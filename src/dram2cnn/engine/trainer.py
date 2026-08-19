@@ -5,6 +5,9 @@ from __future__ import annotations
 早停指标（`train.early_stop_metric`，默认 `best_f1`）在验证集 AUC/PR 为 nan 或全负类时会退化为 **-1.0 占位**；
 **仅当 stop_score>-0.5 且验证概率有限** 时才写入 best checkpoint。训练步 loss/grad 非有限时立即 abort。
 若整轮仍无合法 checkpoint，rank0 在结束时仅在权重有限时写入最后一轮，否则报错。详见 `docs/troubleshooting.md`。
+
+全量 F1 实验上验证搜阈 F1 常在第 2～6 轮见顶、训练仍跑满 patience（如 50）后才停：保存的是历史最优，不是最后一轮；
+训练损失下降不能用来否定早期最优。见 `docs/troubleshooting.md` 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
 """
 
 from pathlib import Path

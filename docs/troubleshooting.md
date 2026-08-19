@@ -1,5 +1,7 @@
 # 常见问题
 
+训练日志里 `best_f1` 高峰很早（当前交付第 2 轮）时，先看「全量训练为何第 2 轮就是最优」——那不是没训够。
+
 ## 切换 horizon / 索引后 validate 报错
 
 - **现象**：`preprocess_manifest.json 中 window_seconds=300 与当前配置 1800 不一致`（完整 validate / train 前）；或预处理报 **`索引附属统计文件中的 label_horizon_seconds=300 与当前配置 1800 不一致`**。  
@@ -161,9 +163,19 @@ Jupyter 会持久化单元格输出；若笔记本显示与当前源码不符的
 
 ## 早停看的是哪一列？`best_f1` 与 `f1@0.5` 为何差很多？
 
-- **早停**由 `configs/train.yaml` 的 **`train.early_stop_metric`** 决定（默认 **`best_f1`**，验证集阈值搜索后的 F1，与 infer 的 `best_threshold.json` 一致）。可选 **`avg_precision`**（阈值无关的 PR-AUC）。日志里的 **`best_f1` 列**与早停默认项同名；**`f1@0.5`** 是固定 0.5 阈值下的 F1，三者不可混为一谈。  
+- **早停**由 `configs/train.yaml` 的 **`train.early_stop_metric`** 决定（默认 **`best_f1`**，验证集阈值搜索后的 F1，与 infer 的 `best_threshold.json` 一致）。可选 **`avg_precision`**（阈值无关的 PR-AUC）。日志里的 **`best_f1` 列**与早停默认项同名；**`f1@0.5`** 是固定 0.5 阈值下的 F1，三者不可混为一谈。全量上 `best_f1` 可以在第 2 轮见顶，同时后期 `f1@0.5` 更高——应保留前者对应的权重，见下一节。概念与搜阈步骤见 [`training_principles.md`](training_principles.md)。  
 - 每 epoch 日志中会额外打印 **`early_stop_metric` 的当前分数**（与 `epoch_metrics.csv` 中 `early_stop_score` 一致）；早停触发时会写明 **metric 名**、**patience** 与 **best_该指标**。  
 - 验证集 **极小**（如 `N_val` 小于 32）时，ROC-AUC / PR-AP 易在首轮即达平台，随后连续 `patience` 轮无提升会早停，**不等于**训练/验证泄漏。
+
+## 全量训练为何第 2 轮就是最优？是不是没训够 / patience 设错了？
+
+**不是。** 这是本项目全量 F1 实验的常见现象，不要和「只训了 2 轮就停」混为一谈。
+
+- **早停盯的是验证集搜阈 F1**（`early_stop_metric: best_f1`），不是训练损失，也不是 `f1@0.5`。  
+- 全量 `patience=50`（冒烟才覆盖为 6）。权重在第 2～6 轮见顶后，训练**继续跑**，直到连续 50 轮无提升（本交付停在第 **52** 轮）。磁盘上的 `grid_cnn.pt` 是历史最优，不是最后一轮。  
+- **训练损失继续下降、后期 `f1@0.5` 升高**，同时验证 AUC / 搜阈 F1 回落：主分界面已在前几轮学到，再训是过拟合。CE 热图信号粗、Adam `lr=0.001`、大 batch、类别权重 + 过采样会加速早期拟合。  
+- **如何核对不是噪声尖峰**：用独立测试集部署口径。本次交付测试 F1≈0.7679（略高于验证 0.760），与历史全量同一水平。  
+- 完整数字与曲线对照：[`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)；搜阈原理见 [`training_principles.md`](training_principles.md)；配置语义见 `docs/project_configuration_reference.md` §13.5。
 
 ## 多卡冒烟想改成单卡
 

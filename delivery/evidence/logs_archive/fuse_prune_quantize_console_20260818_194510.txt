@@ -1,0 +1,66 @@
+---
+pid: 72489
+cwd: "/root/workspace"
+command: "cd /root/workspace && bash scripts/fuse_prune_quantize.sh configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml --sparsity 0.3 --finetune-epochs 5 --adaround-steps 200"
+title: "Full fuse prune per-layer symmetric INT8"
+status: succeeded
+started_at: 2026-08-18T11:45:21.683Z
+running_for_ms: 183590   
+---
+2026-08-18 19:45:24,730 [INFO] exp_config=configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml
+2026-08-18 19:45:24,731 [INFO] train_dir=/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883
+2026-08-18 19:45:24,731 [INFO] ckpt=/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/checkpoints/grid_cnn.pt
+2026-08-18 19:45:24,731 [INFO] out_dir=/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/fuse_prune_quant_20260818_194524_730260
+2026-08-18 19:45:24,731 [INFO] threshold=0.7600 sparsity=0.300 finetune_epochs=5 protect_ends=False device=cuda:0
+2026-08-18 19:45:24,912 [INFO] Loaded ckpt=/root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/checkpoints/grid_cnn.pt | params=3184192 | head_bias=False
+2026-08-18 19:45:33,928 [INFO] Stage0 FP32(train): deploy F1=0.7679 | valτ F1=0.7679 (τ=0.76)
+2026-08-18 19:45:44,185 [INFO] Stage1 Fuse+no-bias: deploy F1=0.2345 | valτ F1=0.4363 (τ=0.10)
+2026-08-18 19:45:44,293 [INFO] Stage2 prune unstructured L1 sparsity=0.30 → achieved=0.3000
+2026-08-18 19:45:44,293 [INFO] Stage2 short finetune epochs=5 …
+2026-08-18 19:46:07,673 [INFO]   finetune epoch 1/5 loss=0.4840
+2026-08-18 19:46:29,089 [INFO]   finetune epoch 2/5 loss=0.3564
+2026-08-18 19:46:50,208 [INFO]   finetune epoch 3/5 loss=0.3313
+2026-08-18 19:47:11,786 [INFO]   finetune epoch 4/5 loss=0.3208
+2026-08-18 19:47:32,711 [INFO]   finetune epoch 5/5 loss=0.3170
+2026-08-18 19:47:40,752 [INFO] Stage2 after prune(+ft): deploy F1=0.7236 | valτ F1=0.7676 (τ=0.56)
+2026-08-18 19:47:40,752 [INFO] Stage3 W8A8 PTQ (skip_fold, force_zero_bias) threshold=0.5600 …
+2026-08-18 19:47:40,752 [INFO] Stage3 protect_stem=False protect_head_out=False（False=该层也走 INT8）
+2026-08-18 19:47:40,759 [INFO] Device: cuda:0 | cuda_available=True | device_count=3 | current=0
+2026-08-18 19:47:40,759 [INFO]   GPU0: NVIDIA GeForce RTX 4090
+2026-08-18 19:47:40,759 [INFO]   GPU1: NVIDIA GeForce RTX 4090
+2026-08-18 19:47:40,759 [INFO]   GPU2: NVIDIA GeForce RTX 4090
+2026-08-18 19:47:40,759 [INFO] 说明：本 PTQ（逐层 AdaRound + 激活校准）为单进程单卡流程；与全量训练 DDP 不同，默认只用一张可见 GPU，属正常设计。
+2026-08-18 19:47:44,653 [INFO] FP32 deployment metrics: {"accuracy": 0.8835078534031413, "f1": 0.7676240208877284, "precision": 0.8654331370899916, "recall": 0.6896782841823056, "roc_auc": 0.89673669320748, "avg_precision": 0.8528964173609378, "threshold": 0.56, "confusion": {"tp": 1029, "fp": 160, "fn": 463, "tn": 3696}, "precision_from_counts": 0.8654331370899916, "recall_from_counts": 0.6896782841823056}
+2026-08-18 19:47:44,678 [INFO] skip_fold=True：假定输入已是 FoldedConvReLU 拓扑
+2026-08-18 19:47:44,678 [INFO] force_zero_bias=True：已确认 Conv/Linear 均无 bias
+2026-08-18 19:47:48,505 [INFO] BN-Fold FP32 metrics: {"accuracy": 0.8835078534031413, "f1": 0.7676240208877284, "precision": 0.8654331370899916, "recall": 0.6896782841823056, "roc_auc": 0.89673669320748, "avg_precision": 0.8528964173609378, "threshold": 0.56, "confusion": {"tp": 1029, "fp": 160, "fn": 463, "tn": 3696}, "precision_from_counts": 0.8654331370899916, "recall_from_counts": 0.6896782841823056}
+2026-08-18 19:47:48,516 [INFO] Calibrating activations (pre-AdaRound) on val subset n=1024 …
+2026-08-18 19:47:49,984 [INFO] AdaRound layer-wise reconstruction (steps=200) …
+2026-08-18 19:47:49,985 [INFO]   adaround: stem
+2026-08-18 19:47:52,331 [INFO]   adaround: stages.0.net.0
+2026-08-18 19:47:55,768 [INFO]   adaround: stages.0.net.1
+2026-08-18 19:47:59,203 [INFO]   adaround: stages.1.net.0
+2026-08-18 19:48:00,854 [INFO]   adaround: stages.1.net.1
+2026-08-18 19:48:03,012 [INFO]   adaround: stages.1.net.2
+2026-08-18 19:48:05,242 [INFO]   adaround: stages.2.net.0
+2026-08-18 19:48:06,678 [INFO]   adaround: stages.2.net.1
+2026-08-18 19:48:08,257 [INFO]   adaround: stages.2.net.2
+2026-08-18 19:48:09,834 [INFO]   adaround: stages.3.net.0
+2026-08-18 19:48:10,806 [INFO]   adaround: stages.3.net.1
+2026-08-18 19:48:11,718 [INFO]   adaround: head.0
+2026-08-18 19:48:12,556 [INFO]   adaround: head.3
+2026-08-18 19:48:13,389 [INFO] Re-calibrating activations (post-AdaRound) …
+2026-08-18 19:48:19,055 [INFO] W8A8 fake-quant deployment metrics: {"accuracy": 0.8833208676140614, "f1": 0.748792270531401, "precision": 0.9375, "recall": 0.6233243967828418, "roc_auc": 0.8748640745108074, "avg_precision": 0.820090419138108, "threshold": 0.56, "confusion": {"tp": 930, "fp": 62, "fn": 562, "tn": 3794}, "precision_from_counts": 0.9375, "recall_from_counts": 0.6233243967828418}
+2026-08-18 19:48:19,056 [INFO] FP32 prob summary: {"mean_prob": 0.3838774561882019, "mean_prob_pos": 0.750544548034668, "mean_prob_neg": 0.24200312793254852, "frac_pred_pos": 0.22232610321615556}
+2026-08-18 19:48:19,056 [INFO] W8A8 fake-quant prob summary: {"mean_prob": 0.35242006182670593, "mean_prob_pos": 0.7158929705619812, "mean_prob_neg": 0.21178171038627625, "frac_pred_pos": 0.1854899027673897}
+2026-08-18 19:48:23,587 [INFO] W8A8 packed-INT8 deployment metrics: {"accuracy": 0.8833208676140614, "f1": 0.748792270531401, "precision": 0.9375, "recall": 0.6233243967828418, "roc_auc": 0.8745937878922718, "avg_precision": 0.8201136373432888, "threshold": 0.56, "confusion": {"tp": 930, "fp": 62, "fn": 562, "tn": 3794}, "precision_from_counts": 0.9375, "recall_from_counts": 0.6233243967828418}
+2026-08-18 19:48:23,588 [INFO] max |p_fakequant - p_int8| = 0.0399006
+2026-08-18 19:48:23,707 [INFO] Stage3 INT8 packed: F1=0.7488 P=0.9375 R=0.6233 | packed=3.044 MB
+Fuse→Prune→Quant done: /root/workspace/runs/exp_tianchi_full_f1_nobias_allint8_ddp/20260818_193250_910883/fuse_prune_quant_20260818_194524_730260
+  INT8 F1=0.748792270531401 | summary: summary.md
+
+---
+exit_code: 0
+elapsed_ms: 183590
+ended_at: 2026-08-18T11:48:25.273Z
+---

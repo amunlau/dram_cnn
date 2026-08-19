@@ -258,6 +258,7 @@ def run_fuse_prune_quantize(
                 if all_int8
                 else f"保护层：stem={protect_stem} head.3={protect_head_out}（True 表示该层保持单精度）。"
             ),
+            "量化方案：逐层（per-tensor）对称 signed INT8，权重与激活 zero-point=0；非逐通道、非 uint8。",
             "主交付模型：w8a8/grid_cnn_w8a8_packed.pt",
         ],
     }
@@ -278,6 +279,7 @@ def _write_summary_md(path: Path, summary: dict[str, Any]) -> None:
         f"- 保护主干首层：**{summary.get('protect_stem')}**（False=该层 INT8）",
         f"- 保护分类末层：**{summary.get('protect_head_out')}**（False=该层 INT8）",
         f"- 整网全 INT8：**{summary.get('all_layers_int8')}**",
+        "- 量化：逐层对称 signed INT8（zp=0；非逐通道、非 uint8）",
         f"- 耗时（秒）：{summary.get('elapsed_sec'):.1f}" if summary.get("elapsed_sec") else "",
         "",
         "## 各阶段测试指标",
