@@ -26,7 +26,12 @@ def short_finetune(
     max_train_samples: int | None = None,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
-    """在训练集上做短时 CE 微调，恢复结构化剪枝后的精度。"""
+    """在训练集上做短时 CE 微调，恢复结构化剪枝后的精度。
+
+    若模型处于 ``torch.nn.utils.prune`` 未 finalize 状态（仍挂 weight_mask），
+    前向会自动乘 mask，微调不会破坏有效稀疏；调用方应在微调结束后再
+    ``finalize_unstructured_pruning``。
+    """
 
     def _log(msg: str, *args: Any) -> None:
         if log is not None:

@@ -1,0 +1,24 @@
+{
+  "n_rows": 5348,
+  "threshold": 0.7,
+  "checkpoint": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/checkpoints/grid_cnn.pt",
+  "splits_dir": "/root/workspace/data/splits",
+  "device_resolved": "cuda",
+  "world_size": 3,
+  "y_prob_summary": {
+    "min": 0.06194023787975311,
+    "max": 0.9999858140945435,
+    "mean": 0.48850660232190396,
+    "nunique": 3999
+  },
+  "columns": [
+    "sample_index",
+    "sid",
+    "meta_label",
+    "y_true",
+    "y_pred",
+    "y_prob",
+    "threshold",
+    "predict_time"
+  ]
+}

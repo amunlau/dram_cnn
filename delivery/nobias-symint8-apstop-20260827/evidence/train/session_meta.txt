@@ -1,0 +1,10 @@
+run_name: exp_tianchi_full_f1_nobias_apstop_allint8_ddp
+session: 20260827_092834_346804
+early_stop_metric: avg_precision
+best_epoch: 3
+early_stop_score: 0.8492342503998345
+patience: 50
+epochs_cap: 300
+head_bias: false
+train_best_threshold: 0.7
+note: 早停按验证集 PR-AUC（avg_precision）选模，避免搜阈 F1 在第 1/2 轮见顶；最优在第 3 轮。

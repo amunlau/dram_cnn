@@ -7,10 +7,16 @@ from __future__ import annotations
 
 from dram2cnn.engine.prune.bn_channel import prune_bn_channels
 from dram2cnn.engine.prune.filter_prune import prune_filters_l1
-from dram2cnn.engine.prune.unstructured import prune_unstructured_l1
+from dram2cnn.engine.prune.unstructured import (
+    finalize_unstructured_pruning,
+    prune_unstructured_l1,
+    prune_unstructured_l2,
+)
 
 __all__ = [
     "prune_unstructured_l1",
+    "prune_unstructured_l2",
+    "finalize_unstructured_pruning",
     "prune_bn_channels",
     "prune_filters_l1",
 ]

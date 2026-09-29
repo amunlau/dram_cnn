@@ -1,0 +1,232 @@
+{
+  "calib_batches": 50,
+  "metrics": {
+    "f1": 0.7639141506002183,
+    "precision": 0.8353221957040573,
+    "recall": 0.7037533512064343,
+    "roc_auc": 0.8898567254958674,
+    "avg_precision": 0.8485741422245049,
+    "threshold": 0.78,
+    "threshold_source": "val_retuned_f1",
+    "confusion": {
+      "tp": 1050,
+      "fp": 207,
+      "fn": 442,
+      "tn": 3649
+    },
+    "val_at_val_threshold": {
+      "accuracy": 0.8799551234106208,
+      "f1": 0.7515479876160991,
+      "precision": 0.8900091659028414,
+      "recall": 0.6503683858004019,
+      "roc_auc": 0.8880443366058467,
+      "avg_precision": 0.8418625386809946,
+      "threshold": 0.78,
+      "confusion": {
+        "tp": 971,
+        "fp": 120,
+        "fn": 522,
+        "tn": 3735
+      }
+    },
+    "test_at_deploy_threshold": {
+      "accuracy": 0.8786462228870606,
+      "f1": 0.7639141506002183,
+      "precision": 0.8353221957040573,
+      "recall": 0.7037533512064343,
+      "roc_auc": 0.8898567254958674,
+      "avg_precision": 0.8485741422245049,
+      "threshold": 0.78,
+      "confusion": {
+        "tp": 1050,
+        "fp": 207,
+        "fn": 442,
+        "tn": 3649
+      }
+    }
+  },
+  "dual": {
+    "n_val": 5348,
+    "n_test": 5348,
+    "n_pos_test": 1492,
+    "deploy_threshold": 0.78,
+    "val_best_threshold": {
+      "threshold": 0.78,
+      "precision": 0.8900091659028414,
+      "recall": 0.6503683858004019,
+      "f1": 0.7515479876160991,
+      "objective": "f1"
+    },
+    "test_at_deploy_threshold": {
+      "accuracy": 0.8786462228870606,
+      "f1": 0.7639141506002183,
+      "precision": 0.8353221957040573,
+      "recall": 0.7037533512064343,
+      "roc_auc": 0.8898567254958674,
+      "avg_precision": 0.8485741422245049,
+      "threshold": 0.78,
+      "confusion": {
+        "tp": 1050,
+        "fp": 207,
+        "fn": 442,
+        "tn": 3649
+      }
+    },
+    "test_at_val_threshold": {
+      "accuracy": 0.8786462228870606,
+      "f1": 0.7639141506002183,
+      "precision": 0.8353221957040573,
+      "recall": 0.7037533512064343,
+      "roc_auc": 0.8898567254958674,
+      "avg_precision": 0.8485741422245049,
+      "threshold": 0.78,
+      "confusion": {
+        "tp": 1050,
+        "fp": 207,
+        "fn": 442,
+        "tn": 3649
+      }
+    },
+    "val_at_val_threshold": {
+      "accuracy": 0.8799551234106208,
+      "f1": 0.7515479876160991,
+      "precision": 0.8900091659028414,
+      "recall": 0.6503683858004019,
+      "roc_auc": 0.8880443366058467,
+      "avg_precision": 0.8418625386809946,
+      "threshold": 0.78,
+      "confusion": {
+        "tp": 971,
+        "fp": 120,
+        "fn": 522,
+        "tn": 3735
+      }
+    },
+    "threshold_protocol": "search on val (f1, [0.1,0.9] step=0.02); report primary metrics on time-stratified full test"
+  },
+  "onnx": {
+    "path": "/root/workspace/runs/exp_tianchi_full_f1_ddp/20260917_153434_808743/quant_official_symint8_ptq_qat_basenew_bnfold_e20_lr1e-4_v2/ptq/grid_cnn_ptq_qdq.onnx",
+    "file_mb": 12.164237976074219,
+    "opset": 17,
+    "ops": [
+      "Conv",
+      "DequantizeLinear",
+      "Flatten",
+      "Gemm",
+      "GlobalAveragePool",
+      "Identity",
+      "MaxPool",
+      "QuantizeLinear",
+      "Relu"
+    ],
+    "n_quantize_linear": 23,
+    "n_dequantize_linear": 23,
+    "n_batchnorm": 0,
+    "has_quantize_linear": true,
+    "has_dequantize_linear": true,
+    "bn_folded": true
+  },
+  "packed": {
+    "path": "/root/workspace/runs/exp_tianchi_full_f1_ddp/20260917_153434_808743/quant_official_symint8_ptq_qat_basenew_bnfold_e20_lr1e-4_v2/ptq/grid_cnn_ptq_symint8_packed.pt",
+    "n_int8_weights": 3162112,
+    "n_fp32_protect_weights": 18368,
+    "theoretical_packed_bytes": 3235628,
+    "theoretical_packed_mb": 3.085735321044922,
+    "measured_packed_mb": 3.1060943603515625,
+    "n_quant_layers": 11,
+    "n_protect_layers": 2,
+    "quant_layer_names": [
+      "stages.0.0.0",
+      "stages.0.1.0",
+      "stages.1.0.0",
+      "stages.1.1.0",
+      "stages.1.2.0",
+      "stages.2.0.0",
+      "stages.2.1.0",
+      "stages.2.2.0",
+      "stages.3.0.0",
+      "stages.3.1.0",
+      "head_fc1"
+    ],
+    "protect_layer_names": [
+      "stem.0.0",
+      "head_out"
+    ],
+    "pack_audit": {
+      "ok": true,
+      "max_recon_err_vs_fq": 0.0002821236848831177,
+      "n_layers": 11,
+      "layers": [
+        {
+          "name": "stages.0.0.0",
+          "scale": 0.0013287437614053488,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.0.1.0",
+          "scale": 0.0012512351386249065,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.1.0.0",
+          "scale": 0.0007670453633181751,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.1.1.0",
+          "scale": 0.0005605780752375722,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.1.2.0",
+          "scale": 0.0004654816002584994,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.2.0.0",
+          "scale": 0.00047768931835889816,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.2.1.0",
+          "scale": 0.0003125907387584448,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.2.2.0",
+          "scale": 0.0002968918706756085,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "stages.3.0.0",
+          "scale": 0.0002821218513417989,
+          "recon_err_vs_fq": 0.0002821236848831177,
+          "q_absmax": 122
+        },
+        {
+          "name": "stages.3.1.0",
+          "scale": 0.00022679367975797504,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        },
+        {
+          "name": "head_fc1",
+          "scale": 0.0006345739820972085,
+          "recon_err_vs_fq": 0.0,
+          "q_absmax": 127
+        }
+      ]
+    },
+    "bn_folded": true
+  },
+  "n_params": 3182594,
+  "bn_folded": true
+}

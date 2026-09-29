@@ -1,0 +1,2 @@
+infer_session=infer_20260827_093909_761420
+metrics={"threshold": 0.7, "threshold_source": "validation best_threshold.json（infer 使用；汇报主评价指标）", "metrics": {"accuracy": 0.8780852655198205, "f1": 0.7669764117226591, "precision": 0.821592649310873, "recall": 0.7191689008042895, "roc_auc": 0.89673669320748, "avg_precision": 0.8560782112865303}}

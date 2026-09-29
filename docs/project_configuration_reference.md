@@ -1,7 +1,7 @@
 # DRAM 网格 CNN 项目：配置体系详解（参考手册）
 
 > **2026-06 实验命名**：项目主评价指标 F1 见 `exp_full_f1_*`（笔记本**04**）；工程实验召回/精度见 `exp_full_recall_*` / `exp_full_precision_*`（笔记本 **05**）。下文说明「全量数据定义」时以 **`exp_full_f1_ddp.yaml`**（主评价指标）与 **`exp_full_recall_ddp.yaml`**（工程实验）为例；冒烟对照见 **`exp_baseline.yaml`**。
-> **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；训练如何学分数、如何搜阈见 [`training_principles.md`](./training_principles.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。全量上验证搜阈 F1 常在前几轮见顶（当前交付第 2 轮、第 52 轮才停）属预期，见 §13.5 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
+> **配套阅读**：数据处理概念与流程见 [`data_processing_guide.md`](./data_processing_guide.md)；规则速查见 [`tianchi_pipeline.md`](./tianchi_pipeline.md)；字段清单见 [`data_dictionary.md`](./data_dictionary.md)；训练如何学分数、如何搜阈见 [`training_principles.md`](./training_principles.md)；排错见 [`troubleshooting.md`](./troubleshooting.md)。全量上验证搜阈 F1 常在前几轮见顶（历史交付第 2 轮）属预期；现行交付改用 `avg_precision` 早停（第 3 轮），见 `delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md` 与 §13.5。
 
 ---
 
@@ -381,7 +381,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 - 日志中的 **`best_f1` 列**表示「验证集上对概率做阈值搜索后的 F1」；**默认 `early_stop_metric: best_f1` 时，早停也看同一标量**。  
 - `f1@0.5` 是固定 0.5 阈值下的 F1，与 `best_f1` 不可混淆解读。  
 - 当 `early_stop_metric: avg_precision` 时，若 PR-AUC 很早到达平台，会连续 `patience` 轮无提升而触发早停——这在**小验证集**上是正常现象。  
-- **全量 `best_f1` 也常在前几轮见顶（交付实验为第 2 轮）**：这不等于 patience 过小，也不等于只训了 2 轮。`patience=50` 时训练会继续到约第 50+ 轮才停；checkpoint 保存的是历史最优。训练损失下降或 `f1@0.5` 上升不能用来否定早期最优。详见 §13.5 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
+- **全量 `best_f1` 也常在前几轮见顶（交付实验为第 2 轮）**：这不等于 patience 过小，也不等于只训了 2 轮。`patience=50` 时训练会继续到约第 50+ 轮才停；checkpoint 保存的是历史最优。训练损失下降或 `f1@0.5` 上升不能用来否定早期最优。详见 §13.5 与 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ### 7.3 `imbalance` 子树
 
@@ -569,7 +569,7 @@ spatial 默认 `[1,2]` 表示只累计 Read CE 与 Scrub CE。若设为 `null`�
 - 训练损失从 0.37 降到 0.08；固定 0.5 阈值 F1 后期可升到 0.72+。这两条曲线**不能**用来论证「应改用最后一轮」。  
 - 独立测试集部署 F1≈0.7679，略高于验证，与历史全量（最优曾出现在第 6 轮，测试 F1≈0.767）同一水平。
 
-原因简述：CE 热图空间模式粗、模型容量足够、Adam 0.001 + 大 batch + 类别权重/过采样使主分界面很快拟合；`best_f1` 对分数分布和阈值敏感，高峰容易出现在前几轮。这是过拟合发生得早，不是训练失败。排错入口见 `docs/troubleshooting.md`；交付侧完整数字见 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
+原因简述：CE 热图空间模式粗、模型容量足够、Adam 0.001 + 大 batch + 类别权重/过采样使主分界面很快拟合；`best_f1` 对分数分布和阈值敏感，高峰容易出现在前几轮。这是过拟合发生得早，不是训练失败。排错入口见 `docs/troubleshooting.md`；交付侧完整数字见 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ---
 

@@ -1,0 +1,43 @@
+# 全量 F1 + 无偏置 + 整网对称 INT8（早停用验证 PR-AUC，避免搜阈 F1 过早见顶）
+# 复用 data/processed 与 data/splits；分类头无 bias；量化阶段勿加 --protect-ends。
+# early_stop_metric=avg_precision：先按排序能力选模，部署阈值仍由验证集 F1 搜索得到。
+base: configs/base.yaml
+data: configs/data.yaml
+model: configs/model.yaml
+train: configs/train.yaml
+infer: configs/infer.yaml
+
+overrides:
+  base:
+    run_name: exp_tianchi_full_f1_nobias_apstop_allint8_ddp
+  data:
+    index_features_path: data/raw/features_index_h300s_step300s_full.csv
+    max_index_rows: null
+    mcelog_max_rows: null
+    split_strategy: time_stratified
+    drop_empty_mcelog_windows: true
+    drop_empty_positive_windows: false
+    normalization_method: robust
+    time_split:
+      min_pos_per_split: 1
+    mcelog_chunk_rows: 400000
+    ram_budget_frac: 0.85
+    preprocess_workers: 1
+  model:
+    head_bias: false
+  train:
+    early_stop_metric: avg_precision
+    patience: 50
+    epochs: 300
+    imbalance:
+      positive_oversample_factor: 2
+      weight_scheme: sqrt
+      positive_weight_cap: 30.0
+      focal_gamma: 0.0
+    threshold_search:
+      objective: f1
+      min: 0.1
+      max: 0.9
+      step: 0.02
+    num_workers: 2
+    prefetch_factor: 2

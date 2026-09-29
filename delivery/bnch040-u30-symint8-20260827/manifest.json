@@ -1,0 +1,149 @@
+{
+  "model": "model/grid_cnn_w8a8_packed.pt",
+  "threshold_file": "model/deploy_threshold.json",
+  "input_quant_params": "model/input_quant_params.json",
+  "channel_masks": "model/channel_masks.json",
+  "deploy_threshold": 0.5,
+  "model_format": "gridcnn_w8a8_packed_v3",
+  "packed_size_bytes": 1367733,
+  "force_zero_bias": true,
+  "all_layers_int8": true,
+  "protect_stem": false,
+  "protect_head_out": false,
+  "bn_channel_ratio": 0.4,
+  "sparsity_target": 0.3,
+  "quant_scheme": {
+    "weight": "per-layer-symmetric-int8",
+    "activation": "per-layer-symmetric-int8",
+    "signed": true,
+    "zero_point": 0,
+    "qmin": -128,
+    "qmax": 127,
+    "not_per_channel": true,
+    "not_uint8": true
+  },
+  "acceptance": {
+    "precision_min": 0.8,
+    "recall_min": 0.6,
+    "precision": 0.9244186046511628,
+    "recall": 0.6394101876675603,
+    "f1": 0.7559429477020603,
+    "passed": true
+  },
+  "docs": {
+    "deploy_readme": "README.md",
+    "quant_and_postprocess": "量化方法与输出后处理说明.md",
+    "evidence_readme": "evidence/README.md",
+    "sweep_note": "evidence/notes/BN通道剪枝比例对比说明.md",
+    "model_structure": "model/模型结构说明.md"
+  },
+  "evidence": {
+    "root": "evidence/",
+    "train": {
+      "dir": "evidence/train/",
+      "session": "20260827_092834_346804",
+      "best_epoch": 3
+    },
+    "fuse_prune_quant": {
+      "dir": "evidence/fuse_prune_quant/",
+      "session": "fuse_prune_quant_bnch_bn040_u30"
+    },
+    "sweep": {
+      "dir": "evidence/sweep/",
+      "compare": "evidence/sweep/compare.csv"
+    },
+    "infer_int8": {
+      "dir": "evidence/infer_int8/",
+      "session": "infer_int8_20260827_103308_756414"
+    }
+  },
+  "splits": {
+    "test": {
+      "X_fp32": "data/X_test.npy",
+      "X_int8": "data/X_test_int8.npy",
+      "y": "data/y_test.npy",
+      "n": 5348,
+      "x_shape": [
+        5348,
+        31,
+        128,
+        32
+      ],
+      "x_int8_dtype": "int8",
+      "y_dtype": "int64",
+      "pos_rate": 0.27898279730740466
+    },
+    "val": {
+      "X_fp32": "data/X_val.npy",
+      "X_int8": "data/X_val_int8.npy",
+      "y": "data/y_val.npy",
+      "n": 5348,
+      "x_shape": [
+        5348,
+        31,
+        128,
+        32
+      ],
+      "x_int8_dtype": "int8",
+      "y_dtype": "int64",
+      "pos_rate": 0.27916978309648466
+    }
+  },
+  "key_metrics": {
+    "fp32_test_f1": 0.7669764117226591,
+    "bn_channel_test_f1": 0.7595489268825028,
+    "int8_test_f1": 0.7559429477020603,
+    "int8_test_precision": 0.9244186046511628,
+    "int8_test_recall": 0.6394101876675603,
+    "int8_deploy_threshold": 0.5,
+    "selected_bn_channel_ratio": 0.4
+  },
+  "sweep_int8": [
+    {
+      "ratio": 0.1,
+      "f1": 0.750407,
+      "precision": 0.953512,
+      "recall": 0.618633,
+      "threshold": 0.56,
+      "packed_mb": 2.5338,
+      "channel_prune_ratio": 0.0835
+    },
+    {
+      "ratio": 0.2,
+      "f1": 0.750407,
+      "precision": 0.953512,
+      "recall": 0.618633,
+      "threshold": 0.56,
+      "packed_mb": 2.0795,
+      "channel_prune_ratio": 0.1659
+    },
+    {
+      "ratio": 0.3,
+      "f1": 0.755328,
+      "precision": 0.918426,
+      "recall": 0.641421,
+      "threshold": 0.58,
+      "packed_mb": 1.6661,
+      "channel_prune_ratio": 0.2478
+    },
+    {
+      "ratio": 0.4,
+      "f1": 0.755943,
+      "precision": 0.924419,
+      "recall": 0.63941,
+      "threshold": 0.5,
+      "packed_mb": 1.3044,
+      "channel_prune_ratio": 0.3303
+    },
+    {
+      "ratio": 0.5,
+      "f1": 0.750407,
+      "precision": 0.953512,
+      "recall": 0.618633,
+      "threshold": 0.64,
+      "packed_mb": 0.9809,
+      "channel_prune_ratio": 0.4138
+    }
+  ],
+  "说明": "BN-γ=0.40 + 非结构化30% + 融合无偏置 + 整网逐层对称 INT8。验收：精确率>0.8 且召回率>0.6。"
+}

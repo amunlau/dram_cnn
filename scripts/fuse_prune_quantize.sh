@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# dram2cnn — 融合(无 bias) → 非结构化剪枝 → W8A8 量化
+# dram2cnn —（可选 BN-γ）→ 融合(无 bias) → 非结构化剪枝 → W8A8 量化
 #
 # 【做什么】
 #   对已训练 checkpoint：
+#     0) 可选：BN-γ 结构化通道剪枝 + 短时微调（须在融合前，BN 仍在）
 #     1) Conv+BN+ReLU 融合，并强制丢弃 bias（硬件无偏置）
 #     2) 非结构化 L1 剪枝（默认 30%）+ 可选短时微调
 #     3) 逐层对称 signed INT8 PTQ（zp=0；非逐通道、非 uint8），导出 packed INT8
@@ -12,7 +13,7 @@
 # 【怎么用】
 #   bash scripts/fuse_prune_quantize.sh configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml
 #   bash scripts/fuse_prune_quantize.sh configs/experiments/exp_full_f1_nobias_allint8_ddp.yaml \
-#       --sparsity 0.3 --finetune-epochs 5
+#       --sparsity 0.3 --bn-channel-ratio 0.2 --finetune-epochs 5
 #   # 若需恢复旧行为（首尾层保持单精度）：追加 --protect-ends
 # =============================================================================
 set -euo pipefail

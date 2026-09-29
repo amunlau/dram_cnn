@@ -30,7 +30,7 @@ Jupyter 工作流与命令行 **`scripts/*.sh`** 共用同一套配置（`config
 | `full_f1_sid` | `exp_full_f1_sid.yaml` | `exp_tianchi_full_f1_sid` |
 
 - 早停：`best_f1`；阈值搜索：`objective: f1`
-- 全量 `patience=50`。验证搜阈 F1 常在前几轮见顶（当前交付为第 2 轮），训练仍会跑到约 50+ 轮才停；这不是没训够，见 `delivery/evidence/notes/训练早停与第2轮最优说明.md` 与 `docs/troubleshooting.md`。
+- 全量 `patience=50`。验证搜阈 F1 常在前几轮见顶（当前交付为第 2 轮），训练仍会跑到约 50+ 轮才停；这不是没训够，见 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md` 与 `docs/troubleshooting.md`。
 - `drop_empty_positive_windows: false`（与 F1 主实验预处理设定一致）
 - 对比表：`outputs/tables/full_f1_time_vs_sid_deployment_kpi.csv`
 - 正式指标见 `outputs/tables/full_f1_time_vs_sid_deployment_kpi.csv`；权重在 `runs/exp_tianchi_full_f1_*/<session>/checkpoints/grid_cnn.pt`

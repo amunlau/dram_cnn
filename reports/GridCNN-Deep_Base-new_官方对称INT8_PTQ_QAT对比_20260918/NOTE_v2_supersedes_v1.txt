@@ -1,0 +1,2 @@
+v1 目录（有原理偏差，勿作主结论）：runs/.../quant_official_symint8_ptq_qat_basenew_e20_lr1e-4/
+v2 现行：runs/.../quant_official_symint8_ptq_qat_basenew_bnfold_e20_lr1e-4_v2/

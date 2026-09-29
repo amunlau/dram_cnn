@@ -4,9 +4,13 @@
 
 | 文件/目录 | 说明 |
 |-----------|------|
+| `GridCNN-Deep_FP32后处理剪枝与量化专题报告.md` | **FP32 后处理专题**（融合无偏置、BN-γ/非结构化剪枝、对称 INT8 原理与对比，万字级） |
+| `GridCNN-Deep_20260827_BNγ通道剪枝交付摘要.md` | **现行交付**摘要（BN-γ 0.40 + 非结构化 30%；扫参对比） |
+| `GridCNN-Deep_20260827交付与INT8结果摘要.md` | 上一版仅非结构化交付摘要（τ=0.52；INT8 F1≈0.757） |
 | `基于CNN的内存故障预测算法设计报告.md` | 主报告 V3.0（九章清晰结构；算法设计与验收） |
 | `算法开发与实验结果.md` | 实验设计、评价方法与 **2026-07-10 实测结果**（含配图） |
 | `GridCNN-Deep_W8A8量化报告.md` | W8A8 PTQ 专题（含 packed INT8；固定部署 τ 口径） |
+| `GridCNN-Deep_Base-new_官方对称INT8_PTQ_QAT对比_20260918/` | **Base-new** 官方对称 INT8 FP32/PTQ/QAT（**v2：BN 折叠后 FakeQuant**；QDQ 无 BN；val 重搜 τ） |
 | `GridCNN剪枝对比实验报告.md` | 三种粒度剪枝对比实测表（主指标=val 重搜 τ） |
 | `GridCNN剪枝对比说明.md` | 三种方法思路、评估口径、注意事项与复现 |
 | `GridCNN剪枝对比实验_summary.json` | 上述实验的机器可读汇总 |
@@ -19,7 +23,8 @@
 
 **阅读顺序**：主报告 → `算法开发与实验结果.md` → `algorithm_scripts_index.md` → 量化 / 剪枝 / 先剪枝后量化专题 → `figures/`。
 
-当前无偏置整网 INT8 交付的训练验证最优在第 2 轮（patience=50，第 52 轮才停），属预期，不是训练失败；见 `delivery/evidence/notes/训练早停与第2轮最优说明.md` 与主报告 §6.2。
+**交付总目录**：[`delivery/`](../delivery/README.md)。**现行子包**：`delivery/bnch040-u30-symint8-20260827/`（2026-08-27；BN-γ=0.40 + 非结构化 30% + 整网 INT8；P≈0.924 / R≈0.639 / τ=0.50）。上一版仅非结构化 `delivery/nobias-symint8-apstop-20260827/` 与历史 `delivery/nobias-symint8-20260818/` 请勿与现行数字混表。
+
 
 **剪枝与量化评估口径（摘要）**：
 

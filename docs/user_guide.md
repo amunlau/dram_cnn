@@ -254,7 +254,7 @@ bash scripts/evaluate.sh configs/experiments/exp_full_f1_ddp.yaml
 
 训练启动时 rank0 会打印**数据摘要**；若仍提示 stub 路径，说明 `index_features_path` 未改成功。
 
-全量 `patience=50`（冒烟 YAML 才覆盖为 6）。验证搜阈 F1 常在第 2～6 轮见顶，训练仍会跑到连续 50 轮无提升才停；磁盘权重是历史最优。当前无偏置 INT8 交付为第 2 轮最优、第 52 轮早停，属预期，见 [`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。
+全量 `patience=50`（冒烟 YAML 才覆盖为 6）。验证搜阈 F1 常在第 2～6 轮见顶；也可改用 `avg_precision` 早停。训练仍会跑到连续 50 轮无提升才停；磁盘权重是历史最优。现行交付（PR-AUC）第 3 轮最优、第 53 轮早停，见 [`训练早停与第3轮最优说明.md`](../delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md)。
 
 ### 6.1 按 sid 切分（跨服务器泛化评估）
 
@@ -615,7 +615,7 @@ CUDA_VISIBLE_DEVICES=0 bash scripts/train.sh configs/experiments/exp_full_f1_ddp
 2. **1 小时**：读 [`tianchi_pipeline.md`](tianchi_pipeline.md) + 手动跑一遍 §5 分步命令（或与笔记本冒烟对照）。
 3. **半天**：笔记本**04 全量 F1** 或 **05 召回/精度**（§6）；sid 对比见各笔记本 sid 单元。
 4. **深入**：[`data_processing_guide.md`](data_processing_guide.md) + [`project_configuration_reference.md`](project_configuration_reference.md)。
-5. **部署交付**：仓库根目录 [`delivery/`](../delivery/README.md)（无偏置 + 整网**逐层对称 signed INT8** 模型/数据/证据）；一体流水线见 `scripts/fuse_prune_quantize.sh` 与实验 `exp_full_f1_nobias_allint8_ddp.yaml`。本次交付验证最优在第 2 轮、训练至第 52 轮早停（patience=50），属预期，见 [`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。
+5. **部署交付**：总入口 [`delivery/README.md`](../delivery/README.md)。现行包 [`delivery/bnch040-u30-symint8-20260827/`](../delivery/bnch040-u30-symint8-20260827/README.md)（BN-γ 0.40 + 非结构化 30% + 整网对称 INT8，τ=0.50）。上一版仅非结构化见 [`nobias-symint8-apstop-20260827/`](../delivery/nobias-symint8-apstop-20260827/README.md)；历史 08-18 包见 [`nobias-symint8-20260818/`](../delivery/nobias-symint8-20260818/README.md)。一体流水线见 `scripts/fuse_prune_quantize.sh`（支持 `--bn-channel-ratio`）。
 
 ---
 

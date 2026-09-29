@@ -253,7 +253,7 @@ Epoch k | loss=... | roc_auc=... | pr_ap=... | f1@0.5=... | best_f1=... | best_t
 
 `early_stop_metric` 默认 `best_f1`，即用上表第三行那个标量跟历史最优比。可选 `avg_precision`、`roc_auc`、`f1_at_0p5` 等，见配置手册 §7.2 / §13。
 
-常见误读：后期 `loss` 更低、`f1@0.5` 更高，就认为应改用最后一轮。本仓库**明确不这样选**。交付实验里训练损失从约 0.37 降到 0.08，固定 0.5 的 F1 后期可到 0.72+，但搜阈 F1 与 AUC 在第 2～3 轮见顶后回落——主分界面已经学到，再训是过拟合。完整数字见 [`../delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。三列为什么会分道、以及为何早停用 `best_f1` 会显得「第 2 轮就最好」，见下一节。
+常见误读：后期 `loss` 更低、`f1@0.5` 更高，就认为应改用最后一轮。本仓库**明确不这样选**。交付实验里训练损失从约 0.37 降到 0.08，固定 0.5 的 F1 后期可到 0.72+，但搜阈 F1 与 AUC 在第 2～3 轮见顶后回落——主分界面已经学到，再训是过拟合。完整数字见 [`../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md)。三列为什么会分道、以及为何早停用 `best_f1` 会显得「第 2 轮就最好」，见下一节。
 
 ---
 
@@ -364,7 +364,7 @@ CE 热图模式粗、模型够大（约 3.18M 参数）、Adam `lr=0.001`、大 
 若早停盯 AUC，往往会停在第 3 轮附近（和本交付第 2 轮几乎同学期）；不会出现「损失还在降、0.5-F1 还在升、却在第 2 轮保存」这种看起来更刺眼的反差。  
 刺眼，是因为 `f1@0.5` 和 `loss` 还在往「教材意义上的更好」走，而选模标量已经掉头了。
 
-这不等于 patience 设错，也不等于只训了 2 轮：`patience=50`，训练跑到第 **52** 轮才停；磁盘权重是历史最优（第 2 轮）。三次全量最优都在第 2～6 轮，测试 F1 都在约 0.767。现象说明见 [`../delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)。
+这不等于 patience 设错，也不等于只训了 2 轮：`patience=50`，训练跑到第 **52** 轮才停；磁盘权重是历史最优（第 2 轮）。三次全量最优都在第 2～6 轮，测试 F1 都在约 0.767。现象说明见 [`../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md)。
 
 ### 7.6 为什么仍说「合理」
 
@@ -419,7 +419,7 @@ CE 热图模式粗、模型够大（约 3.18M 参数）、Adam `lr=0.001`、大 
 | `epoch_metrics.csv` | 每一轮的 loss / AUC / `f1@0.5` / `best_f1` / `best_t` |
 | `figures/val_best_f1_curve.png` 等 | 曲线；对比 `f1@0.5` 与 `best_f1` 用 `val_f1_compare_curve.png` |
 
-交付包把上述证据拷在 `delivery/evidence/train/`。
+交付包把上述证据拷在 `delivery/nobias-symint8-20260818/evidence/train/`。
 
 ---
 
@@ -448,7 +448,7 @@ CE 热图模式粗、模型够大（约 3.18M 参数）、Adam `lr=0.001`、大 
 | [`project_configuration_reference.md`](project_configuration_reference.md) §7.2、§7.4、第十三章 | 配置项与日志列语义 |
 | [`troubleshooting.md`](troubleshooting.md) | `best_f1` vs `f1@0.5`；「第 2 轮最优」FAQ |
 | [`user_guide.md`](user_guide.md) | 命令行怎么跑 |
-| [`../delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md) | 本次交付第 2 轮见顶的数字与曲线 |
+| [`../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md) | 本次交付第 2 轮见顶的数字与曲线 |
 | `src/dram2cnn/engine/trainer.py` | 训练循环、早停、写 checkpoint |
 | `src/dram2cnn/engine/metrics.py` → `search_threshold` | 网格搜索 |
 | `src/dram2cnn/engine/predictor.py` | 测试集按 \(\tau^{*}\) 切分 |

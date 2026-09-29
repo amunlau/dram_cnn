@@ -1,0 +1,177 @@
+{
+  "method": "PTQ + BN Folding + AdaRound-style + post-AdaRound act recalib + packed INT8 infer",
+  "scheme": "W8A8_per_layer_symmetric_int8",
+  "weight_quant": "per-layer (per-tensor) symmetric signed int8, zp=0",
+  "activation_quant": "per-layer (per-tensor) symmetric signed int8, zp=0 (not uint8)",
+  "bn_folding": true,
+  "force_zero_bias": true,
+  "skip_fold": true,
+  "qat": false,
+  "device": "cuda:0",
+  "gpu_note": "PTQ AdaRound 为单卡逐层优化；不使用 DDP 多卡属正常。",
+  "calib": {
+    "split": "val",
+    "n_samples": 1024,
+    "sampling": "uniform random seed=42 without replacement",
+    "act_observer": "percentile 99.9% of |x| → symmetric scale=amax/127, zp=0",
+    "recalib_after_adaround": true
+  },
+  "protect_layers": {
+    "stem": false,
+    "head.3": false
+  },
+  "model": {
+    "arch": "GridCNN-Deep",
+    "conv_layers": 11,
+    "n_params_fp32": 1353714,
+    "input_shape": [
+      31,
+      128,
+      32
+    ],
+    "ckpt": "in_memory_fp32_model",
+    "has_channel_masks": true
+  },
+  "sizes": {
+    "fp32_weights_and_biases_mb": 5.164009094238281,
+    "theoretical_packed_mb": 1.2910518646240234,
+    "packed_int8_file_mb": 1.3043718338012695,
+    "theoretical_compression_ratio": 3.999846354539854,
+    "fp32_state_dict_mb": 5.170515060424805,
+    "quant_export_file_mb": 5.173273086547852
+  },
+  "deployment_threshold": 0.5,
+  "fp32_test_deployment": {
+    "accuracy": 0.8805160807778609,
+    "f1": 0.7637707948243992,
+    "precision": 0.8516075845012366,
+    "recall": 0.6923592493297587,
+    "roc_auc": 0.8886262695649272,
+    "avg_precision": 0.845898227748304,
+    "threshold": 0.5,
+    "confusion": {
+      "tp": 1033,
+      "fp": 180,
+      "fn": 459,
+      "tn": 3676
+    },
+    "precision_from_counts": 0.8516075845012366,
+    "recall_from_counts": 0.6923592493297587
+  },
+  "bn_fold_fp32_test_deployment": {
+    "accuracy": 0.8805160807778609,
+    "f1": 0.7637707948243992,
+    "precision": 0.8516075845012366,
+    "recall": 0.6923592493297587,
+    "roc_auc": 0.8886262695649272,
+    "avg_precision": 0.845898227748304,
+    "threshold": 0.5,
+    "confusion": {
+      "tp": 1033,
+      "fp": 180,
+      "fn": 459,
+      "tn": 3676
+    },
+    "precision_from_counts": 0.8516075845012366,
+    "recall_from_counts": 0.6923592493297587
+  },
+  "w8a8_test_deployment": {
+    "accuracy": 0.8848167539267016,
+    "f1": 0.7559429477020603,
+    "precision": 0.9244186046511628,
+    "recall": 0.6394101876675603,
+    "roc_auc": 0.8706686352107507,
+    "avg_precision": 0.8196541769438045,
+    "threshold": 0.5,
+    "confusion": {
+      "tp": 954,
+      "fp": 78,
+      "fn": 538,
+      "tn": 3778
+    },
+    "precision_from_counts": 0.9244186046511628,
+    "recall_from_counts": 0.6394101876675603
+  },
+  "w8a8_int8_packed_test_deployment": {
+    "accuracy": 0.8848167539267016,
+    "f1": 0.7559429477020603,
+    "precision": 0.9244186046511628,
+    "recall": 0.6394101876675603,
+    "roc_auc": 0.870655164334264,
+    "avg_precision": 0.8193257185044293,
+    "threshold": 0.5,
+    "confusion": {
+      "tp": 954,
+      "fp": 78,
+      "fn": 538,
+      "tn": 3778
+    },
+    "precision_from_counts": 0.9244186046511628,
+    "recall_from_counts": 0.6394101876675603
+  },
+  "fakequant_vs_int8": {
+    "max_abs_prob_diff": 0.014335483312606812,
+    "f1_abs_diff": 0.0
+  },
+  "prob_summary": {
+    "fp32": {
+      "mean_prob": 0.35102200508117676,
+      "mean_prob_pos": 0.7349387407302856,
+      "mean_prob_neg": 0.20247328281402588,
+      "frac_pred_pos": 0.22681376215407628
+    },
+    "w8a8_fakequant": {
+      "mean_prob": 0.3245992362499237,
+      "mean_prob_pos": 0.6989109516143799,
+      "mean_prob_neg": 0.17976698279380798,
+      "frac_pred_pos": 0.19296933433059088
+    },
+    "w8a8_int8": {
+      "mean_prob": 0.3240779936313629,
+      "mean_prob_pos": 0.6986753344535828,
+      "mean_prob_neg": 0.1791352778673172,
+      "frac_pred_pos": 0.19296933433059088
+    }
+  },
+  "drops_vs_fp32": {
+    "f1": {
+      "abs": -0.007827847122338971,
+      "rel": -0.010248947950593862
+    },
+    "precision": {
+      "abs": 0.07281102014992613,
+      "rel": 0.08549832278979709
+    },
+    "recall": {
+      "abs": -0.05294906166219837,
+      "rel": -0.0764762826718296
+    },
+    "roc_auc": {
+      "abs": -0.01795763435417652,
+      "rel": -0.02020830912749024
+    },
+    "f1_int8": {
+      "abs": -0.007827847122338971,
+      "rel": -0.010248947950593862
+    }
+  },
+  "latency_sec_test_forward": {
+    "fp32": 5.000051736831665,
+    "w8a8_fakequant": 3.8631744384765625,
+    "w8a8_int8_packed": 3.8215384483337402,
+    "note": "参考实现墙钟时间，不可与 TensorRT/cuDNN INT8 内核时延对比。"
+  },
+  "paths": {
+    "out_dir": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30/w8a8",
+    "fp32_ref": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30/w8a8/fp32_grid_cnn.pt",
+    "quant_model": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30/w8a8/grid_cnn_w8a8_ptq.pt",
+    "packed_model": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30/w8a8/grid_cnn_w8a8_packed.pt",
+    "predictions_compare": "/root/workspace/runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30/w8a8/test_predictions_compare.csv"
+  },
+  "notes": [
+    "w8a8_test_deployment 为 fake-quant 仿真精度；w8a8_int8_packed_test_deployment 为加载 int8 打包权重的参考推理。",
+    "逐层对称 signed INT8（权重与激活 zp=0，整数域 [-128,127]，非 uint8、非逐通道）。",
+    "主评价指标为部署阶段 F1（固定验证集阈值）。",
+    "Precision 上升通常因固定阈值下预测正例变少（FP 下降快于 TP），伴随 Recall 下降。"
+  ]
+}

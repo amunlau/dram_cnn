@@ -1,0 +1,30 @@
+{
+  "input_quant": {
+    "note": "X_*_int8.npy 由单精度输入按 q=clip(round(x/scale), -128, 127) 得到 signed int8；zero_point=0。",
+    "scheme": "per-tensor-symmetric-int8",
+    "scale": 0.0642202557541254,
+    "zero_point": 0,
+    "qmin": -128,
+    "qmax": 127,
+    "signed": true,
+    "not_uint8": true,
+    "from_layer": "stem",
+    "stem_keep_fp32": false,
+    "first_quant_conv": "stem"
+  },
+  "model_format": "gridcnn_w8a8_packed_v3",
+  "force_zero_bias": true,
+  "protect_stem": false,
+  "protect_head_out": false,
+  "all_layers_int8": true,
+  "bn_channel_ratio": 0.4,
+  "unstructured_sparsity": 0.3,
+  "deploy_threshold": 0.5,
+  "input_shape": [
+    31,
+    128,
+    32
+  ],
+  "dtype_fp32": "float32",
+  "dtype_int8_act": "int8"
+}

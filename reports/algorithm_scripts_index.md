@@ -65,7 +65,7 @@ bash scripts/evaluate.sh configs/experiments/exp_baseline.yaml
 
 ## 4. 全量 F1 主评价指标（验收目标 F1≥0.6）
 
-主实验配置为 `exp_full_f1_ddp`（时间分层 + 多卡）；服务器划分对照为 `exp_full_f1_sid`。正式指标见 `runs/exp_tianchi_full_f1_ddp/infer_*/metrics.json` 部署阶段评价段及 `outputs/tables/full_all_strategies_deployment_kpi.csv`。权重：`runs/<run_name>/<训练会话>/checkpoints/grid_cnn.pt`（可用 `latest_train`）。checkpoint 是验证搜阈 F1 的历史最优，不是最后一轮；全量 `patience=50` 时高峰常在前几轮（当前交付第 2 轮、第 52 轮早停）。见 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
+主实验配置为 `exp_full_f1_ddp`（时间分层 + 多卡）；服务器划分对照为 `exp_full_f1_sid`。正式指标见 `runs/exp_tianchi_full_f1_ddp/infer_*/metrics.json` 部署阶段评价段及 `outputs/tables/full_all_strategies_deployment_kpi.csv`。权重：`runs/<run_name>/<训练会话>/checkpoints/grid_cnn.pt`（可用 `latest_train`）。checkpoint 是验证搜阈 F1 的历史最优，不是最后一轮；全量 `patience=50` 时高峰常在前几轮（当前交付第 2 轮、第 52 轮早停）。见 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`。
 
 ```bash
 export PYTHONPATH=src

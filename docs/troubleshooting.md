@@ -1,6 +1,6 @@
 # 常见问题
 
-训练日志里 `best_f1` 高峰很早（当前交付第 2 轮）时，先看「全量训练为何第 2 轮就是最优」——那不是没训够。
+训练日志里选模高峰很早时，先看对应说明——那不是没训够。现行交付用 `avg_precision` 早停（第 3 轮最优），见 `delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md`；历史 `best_f1` 第 2 轮见顶见下一节与旧 `delivery/nobias-symint8-20260818/` 说明。
 
 ## 切换 horizon / 索引后 validate 报错
 
@@ -175,7 +175,7 @@ Jupyter 会持久化单元格输出；若笔记本显示与当前源码不符的
 - 全量 `patience=50`（冒烟才覆盖为 6）。权重在第 2～6 轮见顶后，训练**继续跑**，直到连续 50 轮无提升（本交付停在第 **52** 轮）。磁盘上的 `grid_cnn.pt` 是历史最优，不是最后一轮。  
 - **训练损失继续下降、后期 `f1@0.5` 升高**，同时验证 AUC / 搜阈 F1 回落：主分界面已在前几轮学到，再训是过拟合。CE 热图信号粗、Adam `lr=0.001`、大 batch、类别权重 + 过采样会加速早期拟合。  
 - **如何核对不是噪声尖峰**：用独立测试集部署口径。本次交付测试 F1≈0.7679（略高于验证 0.760），与历史全量同一水平。  
-- 完整数字与曲线对照：[`delivery/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/evidence/notes/训练早停与第2轮最优说明.md)；搜阈原理见 [`training_principles.md`](training_principles.md)；配置语义见 `docs/project_configuration_reference.md` §13.5。
+- 完整数字与曲线对照：历史包 [`delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`](../delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md)；现行包（PR-AUC 第 3 轮）[`delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md`](../delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md)；搜阈原理见 [`training_principles.md`](training_principles.md)；配置语义见 `docs/project_configuration_reference.md` §13.5。
 
 ## 多卡冒烟想改成单卡
 

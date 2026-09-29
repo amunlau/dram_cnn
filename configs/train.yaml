@@ -12,7 +12,7 @@ max_grad_norm: 1.0
 cudnn_benchmark: true
 # 验证指标连续 `patience` 轮无提升则早停（默认 50；冒烟实验 yaml 可覆盖为更小值）。
 # 全量上 best_f1 常在前几轮见顶（本交付为第 2 轮），之后继续训到 patience 耗尽才停；
-# 这不等于「只训了 2 轮」。说明见 delivery/evidence/notes/训练早停与第2轮最优说明.md
+# 这不等于「只训了 2 轮」。说明见 delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md
 # 与 docs/troubleshooting.md「全量为何第 2 轮就是最优」。
 patience: 50
 # 项目主评价指标为 F1：早停与 checkpoint 选取验证集阈值搜索后的 best_f1（与 threshold_search / infer 一致）。

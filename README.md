@@ -18,7 +18,7 @@
 | **输入** | **`X`** `[N,C,H,W]`，默认 **C=31** |
 | **标签** | **`y`**∈{0,1}，`predict_ts ≤ failed_ts ≤ predict_ts + label_horizon_seconds` |
 | **模型** | **GridCNN-Deep**（`model.yaml`）；冒烟 **`model_smoke.yaml`** |
-| **评价指标** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索）；工程实验可改为 **`avg_precision`** + `threshold_profile`。全量上搜阈 F1 常在前几轮见顶（交付为第 2 轮、训练至第 52 轮才停），属预期，见 `delivery/evidence/notes/训练早停与第2轮最优说明.md` |
+| **评价指标** | **F1**（`evaluate` / 赛题关注）；训练早停默认 **`best_f1`**（验证集阈值搜索）；工程实验可改为 **`avg_precision`**（如现行交付）。搜阈 F1 易在前几轮见顶；现行交付改用 PR-AUC 早停（最优第 3 轮、训至第 53 轮），见 `delivery/nobias-symint8-apstop-20260827/evidence/notes/训练早停与第3轮最优说明.md`；旧包见 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md` |
 | **验收** | 主实验部署阶段 F1≥0.6（已达标）；正式数字见 `outputs/tables/full_all_strategies_deployment_kpi.csv` |
 
 ---
@@ -85,6 +85,7 @@ flowchart LR
 | `scripts/infer.sh` | 推理（同上） |
 | `scripts/evaluate.sh` | 测试集指标与图表 |
 | `scripts/quantize.sh` | W8A8 PTQ（BN Fold + AdaRound；导出 packed INT8） |
+| `scripts/quantize_official.sh` | 官方 `torch.ao` 对称 INT8 PTQ+QAT（QDQ ONNX；多卡 DDP） |
 | `scripts/infer_int8.sh` | 加载 packed INT8 做参考推理（写出 `predictions.csv`） |
 | `scripts/prune.sh` | 三种粒度剪枝对比；主指标为 val 重搜 τ → 全量 test |
 | `scripts/prune_quantize.sh` | 先剪枝后 W8A8 量化（总对比大表；含固定 τ 对照） |
@@ -139,6 +140,8 @@ bash scripts/verify_ddp.sh
 # 6. （可选）W8A8 PTQ → packed INT8 参考推理
 #    需已有全量训练会话与 best_threshold.json；评估用实验 YAML 的 time_stratified splits
 # bash scripts/quantize.sh configs/experiments/exp_full_f1_ddp.yaml
+# bash scripts/quantize_official.sh configs/experiments/exp_full_f1_ddp.yaml \
+#   --train-dir runs/exp_tianchi_full_f1_ddp/20260917_153434_808743
 # bash scripts/infer_int8.sh configs/experiments/exp_full_f1_ddp.yaml
 
 # 7. （可选）三种粒度剪枝对比（默认短时微调 5 epoch；主指标=各模型 val 重搜 τ → test）
@@ -153,7 +156,7 @@ bash scripts/verify_ddp.sh
 
 ```
 
-专题报告：`reports/GridCNN-Deep_W8A8量化报告.md`、`reports/GridCNN剪枝对比实验报告.md`、`reports/GridCNN先剪枝后量化对比报告.md`。
+专题报告：`reports/GridCNN-Deep_W8A8量化报告.md`、`reports/GridCNN-Deep_Base-new_官方对称INT8_PTQ_QAT对比_20260918/`、`reports/GridCNN剪枝对比实验报告.md`、`reports/GridCNN先剪枝后量化对比报告.md`。
 
 **Horizon 对比示例**（索引与实验 YAML 须一致）：
 
@@ -178,7 +181,10 @@ bash scripts/preprocess.sh configs/experiments/exp_horizon_30m.yaml
 | `docs/training_principles.md` | 训练原理与验证集阈值搜索（交叉熵学分数、搜阈定刀、早停选轮） |
 | `docs/troubleshooting.md` | 排错（含量化 / 剪枝 / 先剪枝后量化） |
 | `docs/dataset_processing_specification.md` | 算法向数据处理规范（锚点交叠、空窗、算例） |
-| `delivery/` | 无偏置 + 整网**逐层对称 signed INT8** 交付包（模型/数据/证据/ONNX；见其中 README） |
+| `delivery/` | **交付总目录**（各版本子包）；入口见 [`delivery/README.md`](delivery/README.md) |
+| `delivery/bnch040-u30-symint8-20260827/` | **现行交付**：BN-γ 0.40 + 非结构化 30% + 整网对称 INT8（τ=0.50；P≈0.924 / R≈0.639） |
+| `delivery/nobias-symint8-apstop-20260827/` | 上一版：无偏置 + 整网逐层对称 INT8（PR-AUC 早停第 3 轮；τ=0.52；INT8 F1≈0.757） |
+| `delivery/nobias-symint8-20260818/` | 历史包（2026-08-18；搜阈 F1 第 2 轮；τ=0.56；含 ONNX） |
 | `new-delivery/` | 在线推理与数据处理技术说明（锚点/热图/空窗/加权/台账；不含量化细节） |
 | `reports/GridCNN先剪枝后量化说明.md` | 剪枝→量化评估口径与复现 |
 

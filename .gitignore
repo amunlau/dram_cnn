@@ -61,6 +61,13 @@ data/**/*.normtmp.npy
 !data/README.md
 !data/**/.gitkeep
 
+# 交付包内的赛题数据（X_test/X_val 等 npy，数 GB 级，禁止入库）
+delivery/data/
+delivery/*/data/
+
+# 训练/推理数据产物（npy 统一排除；小 fixture 需用 ! 显式放行）
+*.npy
+
 # =========================
 # Training / inference outputs
 # =========================

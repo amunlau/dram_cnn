@@ -1,0 +1,76 @@
+{
+  "delivery": "delivery/nobias-symint8-apstop-20260827",
+  "date": "2026-08-27",
+  "train_session": "20260827_092834_346804",
+  "fuse_session": "fuse_prune_quant_20260827_093937_648424",
+  "infer_session": "infer_20260827_093909_761420",
+  "infer_int8_session": "infer_int8_20260827_094457_982437",
+  "early_stop_metric": "avg_precision",
+  "best_epoch": 3,
+  "train_best_threshold": 0.7,
+  "deploy_threshold": 0.52,
+  "stages": {
+    "fp32_train_test": {
+      "accuracy": 0.8780852655198205,
+      "f1": 0.7669764117226591,
+      "precision": 0.821592649310873,
+      "recall": 0.7191689008042895,
+      "roc_auc": 0.8967206150645768,
+      "avg_precision": 0.856056480950585,
+      "threshold": 0.7,
+      "confusion": {
+        "tp": 1073,
+        "fp": 233,
+        "fn": 419,
+        "tn": 3623
+      }
+    },
+    "fused_nobias_test_valtau": {
+      "accuracy": 0.27973074046372476,
+      "f1": 0.43651258045640723,
+      "precision": 0.2791916167664671,
+      "recall": 1.0,
+      "roc_auc": 0.33417863807526726,
+      "avg_precision": 0.3199168558935491,
+      "threshold": 0.56,
+      "confusion": {
+        "tp": 1492,
+        "fp": 3852,
+        "fn": 0,
+        "tn": 4
+      }
+    },
+    "fused_pruned_finetune_test_valtau": {
+      "accuracy": 0.8784592370979806,
+      "f1": 0.7629467541940189,
+      "precision": 0.8368,
+      "recall": 0.7010723860589813,
+      "roc_auc": 0.8926153002736585,
+      "avg_precision": 0.8489150340136769,
+      "threshold": 0.52,
+      "confusion": {
+        "tp": 1046,
+        "fp": 204,
+        "fn": 446,
+        "tn": 3652
+      }
+    },
+    "int8_packed_test": {
+      "accuracy": 0.8853777112939416,
+      "f1": 0.7570352754657154,
+      "precision": 0.9262851600387972,
+      "recall": 0.6400804289544236,
+      "roc_auc": 0.8696800466944034,
+      "avg_precision": 0.8174060968445841,
+      "threshold": 0.52,
+      "confusion": {
+        "tp": 955,
+        "fp": 76,
+        "fn": 537,
+        "tn": 3780
+      },
+      "precision_from_counts": 0.9262851600387972,
+      "recall_from_counts": 0.6400804289544236
+    }
+  }
+}

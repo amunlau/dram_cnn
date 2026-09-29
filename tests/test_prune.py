@@ -11,7 +11,7 @@ from dram2cnn.engine.prune.structured_utils import (
     select_keep_indices_per_layer,
     verify_forward,
 )
-from dram2cnn.engine.prune.unstructured import prune_unstructured_l1
+from dram2cnn.engine.prune.unstructured import prune_unstructured_l1, prune_unstructured_l2
 from dram2cnn.models.grid_cnn import GridCNN
 
 
@@ -50,6 +50,44 @@ def test_unstructured_sparsity_close_to_target():
     assert abs(stats["achieved_weight_sparsity"] - sp) < 1e-6
     y = m(torch.randn(2, 4, 16, 8))
     assert y.shape == (2, 2)
+
+
+def test_unstructured_l2_sparsity_and_equivalence_to_l1():
+    m1 = _trained_tiny()
+    m2 = clone_model(m1)
+    s1 = prune_unstructured_l1(m1, 0.4, input_size=(4, 16, 8))
+    s2 = prune_unstructured_l2(m2, 0.4, input_size=(4, 16, 8))
+    assert 0.35 <= weight_sparsity(m2) <= 0.45
+    assert abs(s1["achieved_weight_sparsity"] - s2["achieved_weight_sparsity"]) < 1e-6
+    for (n1, p1), (n2, p2) in zip(m1.named_parameters(), m2.named_parameters()):
+        assert n1 == n2
+        if p1.ndim == 0:
+            continue
+        assert torch.equal(p1.detach() == 0, p2.detach() == 0), n1
+    verify_forward(m2, (4, 16, 8))
+
+
+def test_unstructured_finetune_keeps_sparsity_with_mask():
+    """finalize=False 微调后 remove，稀疏率应仍接近目标（修复「训没稀疏」）。"""
+    from dram2cnn.engine.prune.unstructured import finalize_unstructured_pruning
+
+    m = _trained_tiny()
+    prune_unstructured_l1(m, 0.5, input_size=(4, 16, 8), finalize=False)
+    assert 0.45 <= weight_sparsity(m) <= 0.55
+    m.train()
+    opt = torch.optim.Adam(m.parameters(), lr=1e-3)
+    x = torch.randn(8, 4, 16, 8)
+    y = torch.randint(0, 2, (8,))
+    for _ in range(20):
+        opt.zero_grad(set_to_none=True)
+        loss = torch.nn.functional.cross_entropy(m(x), y)
+        loss.backward()
+        opt.step()
+    # 微调过程中有效权重仍稀疏
+    assert 0.45 <= weight_sparsity(m) <= 0.55
+    finalize_unstructured_pruning(m)
+    assert 0.45 <= weight_sparsity(m) <= 0.55
+    verify_forward(m, (4, 16, 8))
 
 
 def test_bn_channel_forward_and_shrink():

@@ -1,0 +1,5 @@
+run_name: exp_tianchi_full_f1_nobias_apstop_allint8_ddp
+session: 20260827_092834_346804
+early_stop_metric: avg_precision
+best_epoch: 3
+delivery_note: 本交付在该权重上叠加 BN-γ=0.40 + 非结构化30% + 整网INT8

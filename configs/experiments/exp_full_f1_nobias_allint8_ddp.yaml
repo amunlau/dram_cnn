@@ -3,7 +3,7 @@
 # 量化阶段默认不保护首尾层（见 scripts/fuse_prune_quantize.sh，不加 --protect-ends）。
 # patience 显式 50（不是冒烟的 6）。全量 best_f1 常在第 2～6 轮见顶，训练仍会跑到
 # 约 50+ 轮才早停；保存的是历史最优而非最后一轮。见
-# delivery/evidence/notes/训练早停与第2轮最优说明.md
+# delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md
 base: configs/base.yaml
 data: configs/data.yaml
 model: configs/model.yaml

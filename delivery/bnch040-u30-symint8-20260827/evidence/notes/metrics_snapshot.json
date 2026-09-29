@@ -1,0 +1,92 @@
+{
+  "delivery": "delivery/bnch040-u30-symint8-20260827",
+  "date": "2026-08-27",
+  "bn_channel_ratio": 0.4,
+  "unstructured_sparsity": 0.3,
+  "deploy_threshold": 0.5,
+  "int8": {
+    "accuracy": 0.8848167539267016,
+    "f1": 0.7559429477020603,
+    "precision": 0.9244186046511628,
+    "recall": 0.6394101876675603,
+    "roc_auc": 0.870655164334264,
+    "avg_precision": 0.8193257185044293,
+    "threshold": 0.5,
+    "confusion": {
+      "tp": 954,
+      "fp": 78,
+      "fn": 538,
+      "tn": 3778
+    },
+    "precision_from_counts": 0.9244186046511628,
+    "recall_from_counts": 0.6394101876675603
+  },
+  "sweep": [
+    {
+      "ratio": "0.10",
+      "f1": "0.750407",
+      "precision": "0.953512",
+      "recall": "0.618633",
+      "threshold": "0.5600",
+      "packed_mb": "2.5338",
+      "channel_prune_ratio": "0.0835",
+      "param_after": "2645340",
+      "ok": "1",
+      "out_dir": "runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn010_u30",
+      "elapsed_sec": "335.0"
+    },
+    {
+      "ratio": "0.20",
+      "f1": "0.750407",
+      "precision": "0.953512",
+      "recall": "0.618633",
+      "threshold": "0.5600",
+      "packed_mb": "2.0795",
+      "channel_prune_ratio": "0.1659",
+      "param_after": "2169060",
+      "ok": "1",
+      "out_dir": "runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn020_u30",
+      "elapsed_sec": "323.1"
+    },
+    {
+      "ratio": "0.30",
+      "f1": "0.755328",
+      "precision": "0.918426",
+      "recall": "0.641421",
+      "threshold": "0.5800",
+      "packed_mb": "1.6661",
+      "channel_prune_ratio": "0.2478",
+      "param_after": "1735604",
+      "ok": "1",
+      "out_dir": "runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn030_u30",
+      "elapsed_sec": "322.8"
+    },
+    {
+      "ratio": "0.40",
+      "f1": "0.755943",
+      "precision": "0.924419",
+      "recall": "0.639410",
+      "threshold": "0.5000",
+      "packed_mb": "1.3044",
+      "channel_prune_ratio": "0.3303",
+      "param_after": "1356200",
+      "ok": "1",
+      "out_dir": "runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30",
+      "elapsed_sec": "308.8"
+    },
+    {
+      "ratio": "0.50",
+      "f1": "0.750407",
+      "precision": "0.953512",
+      "recall": "0.618633",
+      "threshold": "0.6400",
+      "packed_mb": "0.9809",
+      "channel_prune_ratio": "0.4138",
+      "param_after": "1016896",
+      "ok": "1",
+      "out_dir": "runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn050_u30",
+      "elapsed_sec": "296.4"
+    }
+  ],
+  "selection_reason": "在满足 P>0.8 且 R>0.6 的候选中，选择 INT8 F1 最高且体积明显下降的 bn_channel_ratio=0.40"
+}

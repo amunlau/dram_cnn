@@ -1,0 +1,6 @@
+ratio,f1,precision,recall,threshold,packed_mb,channel_prune_ratio,param_after,ok,out_dir,elapsed_sec
+0.10,0.750407,0.953512,0.618633,0.5600,2.5338,0.0835,2645340,1,runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn010_u30,335.0
+0.20,0.750407,0.953512,0.618633,0.5600,2.0795,0.1659,2169060,1,runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn020_u30,323.1
+0.30,0.755328,0.918426,0.641421,0.5800,1.6661,0.2478,1735604,1,runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn030_u30,322.8
+0.40,0.755943,0.924419,0.639410,0.5000,1.3044,0.3303,1356200,1,runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn040_u30,308.8
+0.50,0.750407,0.953512,0.618633,0.6400,0.9809,0.4138,1016896,1,runs/exp_tianchi_full_f1_nobias_apstop_allint8_ddp/20260827_092834_346804/fuse_prune_quant_bnch_bn050_u30,296.4

@@ -1,0 +1,28 @@
+{
+  "epoch": 3,
+  "early_stop_metric": "avg_precision",
+  "early_stop_score": 0.8492342503998345,
+  "metrics_at_0p5": {
+    "accuracy": 0.75,
+    "f1": 0.6549677419354839,
+    "precision": 0.5327455919395466,
+    "recall": 0.8499665103817816,
+    "roc_auc": 0.8934052817167535,
+    "avg_precision": 0.8492342503998345
+  },
+  "metrics_at_best_threshold": {
+    "accuracy": 0.8792071802543007,
+    "f1": 0.7558578987150416,
+    "precision": 0.8673026886383348,
+    "recall": 0.6697923643670463,
+    "roc_auc": 0.8934052817167535,
+    "avg_precision": 0.8492342503998345
+  },
+  "best_threshold": {
+    "threshold": 0.7,
+    "precision": 0.8673026886383348,
+    "recall": 0.6697923643670463,
+    "f1": 0.7558578987150416,
+    "objective": "f1"
+  }
+}

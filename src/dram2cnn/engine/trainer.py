@@ -7,7 +7,7 @@ from __future__ import annotations
 若整轮仍无合法 checkpoint，rank0 在结束时仅在权重有限时写入最后一轮，否则报错。详见 `docs/troubleshooting.md`。
 
 全量 F1 实验上验证搜阈 F1 常在第 2～6 轮见顶、训练仍跑满 patience（如 50）后才停：保存的是历史最优，不是最后一轮；
-训练损失下降不能用来否定早期最优。见 `docs/troubleshooting.md` 与 `delivery/evidence/notes/训练早停与第2轮最优说明.md`。
+训练损失下降不能用来否定早期最优。见 `docs/troubleshooting.md` 与 `delivery/nobias-symint8-20260818/evidence/notes/训练早停与第2轮最优说明.md`。
 """
 
 from pathlib import Path

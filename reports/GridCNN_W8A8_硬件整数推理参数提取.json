@@ -1,5 +1,5 @@
 {
-  "source_pack": "delivery/model/grid_cnn_w8a8_packed.pt",
+  "source_pack": "delivery/nobias-symint8-20260818/model/grid_cnn_w8a8_packed.pt",
   "format": "gridcnn_w8a8_packed_v3",
   "threshold": 0.56,
   "protect_stem": false,

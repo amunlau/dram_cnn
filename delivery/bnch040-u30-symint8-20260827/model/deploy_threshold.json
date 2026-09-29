@@ -1,0 +1,8 @@
+{
+  "threshold": 0.5,
+  "source": "fuse_prune_quantize 验证集重新搜索后的部署阈值（写入 packed）",
+  "train_best_threshold": 0.7,
+  "bn_channel_ratio": 0.4,
+  "unstructured_sparsity": 0.3,
+  "objective": "f1"
+}

@@ -1,0 +1,132 @@
+{
+  "stem": {
+    "name": "stem",
+    "kind": "conv",
+    "weight_scale": [
+      0.0033954819664359093
+    ],
+    "act_in_scale": 0.0642202557541254,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.0.net.0": {
+    "name": "stages.0.net.0",
+    "kind": "conv",
+    "weight_scale": [
+      0.001185859553515911
+    ],
+    "act_in_scale": 0.03424793153297244,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.0.net.1": {
+    "name": "stages.0.net.1",
+    "kind": "conv",
+    "weight_scale": [
+      0.0011220378801226616
+    ],
+    "act_in_scale": 0.03552744707723302,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.1.net.0": {
+    "name": "stages.1.net.0",
+    "kind": "conv",
+    "weight_scale": [
+      0.0007639491814188659
+    ],
+    "act_in_scale": 0.03340995593333808,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.1.net.1": {
+    "name": "stages.1.net.1",
+    "kind": "conv",
+    "weight_scale": [
+      0.0005126371397636831
+    ],
+    "act_in_scale": 0.03486313406876692,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.1.net.2": {
+    "name": "stages.1.net.2",
+    "kind": "conv",
+    "weight_scale": [
+      0.00044662083382718265
+    ],
+    "act_in_scale": 0.03954793149092066,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.2.net.0": {
+    "name": "stages.2.net.0",
+    "kind": "conv",
+    "weight_scale": [
+      0.0005486252484843135
+    ],
+    "act_in_scale": 0.06260414574089951,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.2.net.1": {
+    "name": "stages.2.net.1",
+    "kind": "conv",
+    "weight_scale": [
+      0.00028169152210466564
+    ],
+    "act_in_scale": 0.10732579418993372,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.2.net.2": {
+    "name": "stages.2.net.2",
+    "kind": "conv",
+    "weight_scale": [
+      0.0002631320967338979
+    ],
+    "act_in_scale": 0.2144658396563192,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.3.net.0": {
+    "name": "stages.3.net.0",
+    "kind": "conv",
+    "weight_scale": [
+      0.00023920426610857248
+    ],
+    "act_in_scale": 0.3279798612819882,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "stages.3.net.1": {
+    "name": "stages.3.net.1",
+    "kind": "conv",
+    "weight_scale": [
+      0.00025206743157468736
+    ],
+    "act_in_scale": 0.2668263593057948,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "head.0": {
+    "name": "head.0",
+    "kind": "linear",
+    "weight_scale": [
+      0.000678740325383842
+    ],
+    "act_in_scale": 1.3679381843626968,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  },
+  "head.3": {
+    "name": "head.3",
+    "kind": "linear",
+    "weight_scale": [
+      0.0005432169418781996
+    ],
+    "act_in_scale": 0.22023960924524022,
+    "act_in_zp": 0,
+    "keep_fp32": false
+  }
+}

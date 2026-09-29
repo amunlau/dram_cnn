@@ -1,0 +1,22 @@
+{
+  "bias_keys_in_other_state": [],
+  "bias_keys_anywhere_in_pack": [],
+  "count": 0,
+  "ok_no_bias": true,
+  "keep_fp32_layers": [],
+  "all_layers_int8": true,
+  "has_channel_masks": true,
+  "bn_channel_ratio": 0.4,
+  "unstructured_sparsity": 0.3,
+  "quant_scheme": {
+    "weight": "per-layer-symmetric-int8",
+    "activation": "per-layer-symmetric-int8",
+    "signed": true,
+    "zero_point": 0,
+    "qmin": -128,
+    "qmax": 127,
+    "not_per_channel": true,
+    "not_uint8": true
+  },
+  "说明": "无 bias；无 keep_fp32；整网逐层对称 signed INT8；含 BN-γ 通道剪枝 masks。"
+}
